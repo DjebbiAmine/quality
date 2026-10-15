@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#16243a" />
+  <title>QualiContact — Synergy Growth</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="app-starting">
+  <div id="authRoot" class="auth-root" hidden></div>
+  <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.7"/><rect x="14" y="3" width="7" height="7" rx="1.7"/><rect x="3" y="14" width="7" height="7" rx="1.7"/><rect x="14" y="14" width="7" height="7" rx="1.7"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5h6a1.5 1.5 0 0 0-1.5-1.5h-3A1.5 1.5 0 0 0 9 4.5Z"/><path d="M8.5 10h7M8.5 14h7M8.5 18h4"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m21 3-7.4 18-3.7-7.9L2 9.4 21 3Z"/><path d="M10 13.1 15.2 8"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 4h16l2 11v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-4L4 4Z"/><path d="M2 15h5l2 3h6l2-3h5M9 9h6"/></symbol>
+    <symbol id="i-headphones" viewBox="0 0 24 24"><path d="M3 13v-1a9 9 0 0 1 18 0v1"/><path d="M5 13h2v7H5a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2ZM19 13h-2v7h2a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2Z"/></symbol>
+    <symbol id="i-message" viewBox="0 0 24 24"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H6l-3 2 1-4a7.5 7.5 0 1 1 16-5.5Z"/><path d="M8 11h8M8 14h5"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-1.5a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4V21"/><circle cx="9.5" cy="7" r="4"/><path d="M17 11a4 4 0 1 0-1-7.9M17 15.5a4 4 0 0 1 4 4V21"/></symbol>
+    <symbol id="i-check-square" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m7 12 3 3 7-7"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.6a8 8 0 0 1-1.7 1l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.7-1l-1.7.6-1.4-2.4 1.4-1.1a7 7 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.6a8 8 0 0 1 1.7-1l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.7 1l1.7-.6 1.4 2.4-1.4 1.1a7 7 0 0 1 0 2Z" transform="translate(-2 -2) scale(1.16)"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-plus-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></symbol>
+    <symbol id="i-arrow-up-right" viewBox="0 0 24 24"><path d="M7 17 17 7M8 7h9v9"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M18 13l-6 6-6-6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5h3v14H8zM15 5h3v14h-3z"/></symbol>
+    <symbol id="i-skip-back" viewBox="0 0 24 24"><path d="M5 5v14M19 5 8 12l11 7V5Z"/></symbol>
+    <symbol id="i-skip-forward" viewBox="0 0 24 24"><path d="M19 5v14M5 5l11 7-11 7V5Z"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10m-7 6h4"/><circle cx="8" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="10" cy="18" r="1.5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 17v3h16v-3"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></symbol>
+    <symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></symbol>
+    <symbol id="i-circle-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5h.01"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="m10.3 4.4-8 14A1.8 1.8 0 0 0 3.9 21h16.2a1.8 1.8 0 0 0 1.6-2.6l-8-14a1.9 1.9 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="m20.6 13.4-7.2 7.2a2 2 0 0 1-2.8 0l-7.2-7.2a2 2 0 0 1-.6-1.4V5a2 2 0 0 1 2-2h7a2 2 0 0 1 1.4.6l7.4 7a2 2 0 0 1 0 2.8Z"/><circle cx="8.5" cy="8.5" r="1"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 2.7-6.4L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></symbol>
+    <symbol id="i-file-audio" viewBox="0 0 24 24"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M13 2v7h7M8 14v3m3-5v7m3-4v2m3-6v5"/></symbol>
+    <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M13 2v7h7M8 13h8M8 17h8"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="i-user-round" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M4 20a8 8 0 0 1 16 0"/><path d="M18.5 4.5a3 3 0 0 1 0 6"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 6-7"/><path d="M17 6h3v3"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3M2 14h4m4-6h4m4 8h4"/></symbol>
+    <symbol id="i-wave" viewBox="0 0 24 24"><path d="M2 10v4m4-8v12m4-15v18m4-13v8m4-12v16m4-11v6"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-log-out" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3"/><path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="m12 3 1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3ZM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8L19 16Z"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="m13.5 8.5 3 3"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4.5h6V7"/><path d="M6.5 7l1 13h9l1-13"/><path d="M10 11v6M14 11v6"/></symbol>
+  </svg>
+
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-lockup">
+        <div class="brand-mark"><span>Q</span><i></i></div>
+        <div class="brand-copy"><strong>QUALI<span>CONTACT</span></strong><small>SYNERGY GROWTH</small></div>
+        <button class="sidebar-close icon-button" data-action="close-sidebar" aria-label="Fermer le menu">×</button>
+      </div>
+      <div class="workspace-switch"><div class="workspace-avatar">SG</div><div><strong>Synergy Growth</strong><small>Opération Qualicontact</small></div><svg class="icon"><use href="#i-chevron-down"/></svg></div>
+      <nav class="side-nav" aria-label="Navigation principale">
+        <div class="nav-section-label">PILOTAGE</div>
+        <button class="nav-link" data-page="dashboard"><svg class="icon"><use href="#i-grid"/></svg><span>Vue d'ensemble</span></button>
+        <button class="nav-link" data-page="records"><svg class="icon"><use href="#i-clipboard"/></svg><span>Fiches d'appel</span></button>
+        <button class="nav-link" data-page="send"><svg class="icon"><use href="#i-send"/></svg><span>À envoyer au client</span><span class="nav-count nav-count-accent" data-nav-count="send"></span></button>
+        <div class="nav-section-label nav-section-spaced">ÉQUIPE</div>
+        <button class="nav-link" data-page="debriefs"><svg class="icon"><use href="#i-users"/></svg><span>Débriefs</span></button>
+        <button class="nav-link" data-page="agents"><svg class="icon"><use href="#i-chart"/></svg><span>Agents & progression</span></button>
+        <button class="nav-link" data-page="tasks"><svg class="icon"><use href="#i-check-square"/></svg><span>Tâches</span></button>
+        <div class="nav-section-label nav-section-spaced">ESPACE CLIENT</div>
+        <button class="nav-link" data-page="portal"><svg class="icon"><use href="#i-shield"/></svg><span>Portail client</span><span class="nav-external">Démo</span></button>
+        <div class="nav-section-label nav-section-spaced">ADMINISTRATION</div>
+        <button class="nav-link" data-page="settings"><svg class="icon"><use href="#i-settings"/></svg><span>Paramètres</span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="sidebar-help"><div class="help-icon"><svg class="icon"><use href="#i-sparkles"/></svg></div><div><strong>Un espace, tout le suivi.</strong><span>Contrôle qualité de bout en bout.</span></div></div>
+        <button class="user-profile" data-action="user-menu"><span class="avatar avatar-sarah">SB</span><span class="user-profile-copy"><strong>Sarah Ben Salem</strong><small>Qualiticienne</small></span><svg class="icon"><use href="#i-more"/></svg></button>
+      </div>
+    </aside>
+    <div class="sidebar-scrim" data-action="close-sidebar"></div>
+    <section class="main-shell">
+      <header class="topbar">
+        <div class="topbar-left"><button class="icon-button mobile-menu" data-action="open-sidebar" aria-label="Ouvrir le menu"><svg class="icon"><use href="#i-menu"/></svg></button><div class="breadcrumbs"><span>QualiContact</span><svg class="icon"><use href="#i-chevron-right"/></svg><strong id="breadcrumbCurrent">Vue d'ensemble</strong></div></div>
+        <div class="topbar-actions">
+          <div class="global-search-wrap"><svg class="icon"><use href="#i-search"/></svg><input id="globalSearch" type="search" placeholder="Rechercher une fiche, un agent…" autocomplete="off" aria-label="Recherche globale"/><kbd>⌘ K</kbd><div class="search-results" id="globalSearchResults"></div></div>
+          <button class="icon-button notification-button" data-action="notifications" aria-label="Notifications"><svg class="icon"><use href="#i-bell"/></svg><i></i></button>
+          <div class="topbar-user"><span class="avatar avatar-sarah">SB</span><div><strong>Sarah B.</strong><small>Qualité</small></div><svg class="icon"><use href="#i-chevron-down"/></svg></div>
+        </div>
+      </header>
+      <main class="main-content" id="mainContent"></main>
+      <footer class="app-footer"><span>QualiContact CRM <b>·</b> Synergy Growth</span><span>Environnement de démonstration <i></i></span></footer>
+    </section>
+  </div>
+  <div id="modalRoot" class="modal-root" aria-live="polite"></div>
+  <div id="toastRoot" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+  <script src="app.js"></script>
+</body>
+</html>

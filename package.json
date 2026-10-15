@@ -1,0 +1,37 @@
+{
+  "name": "qualicontact-local-crm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "QualiContact CRM local avec PostgreSQL, authentification par session et stockage audio MinIO.",
+  "main": "local-api/server.js",
+  "scripts": {
+    "start": "node ./server.js",
+    "db:init": "node local-api/scripts/init-db.js",
+    "db:migrate-agents": "node local-api/scripts/migrate-agents.js",
+    "db:migrate-assign": "node local-api/scripts/migrate-assign.js",
+    "db:migrate-relational": "node local-api/scripts/migrate-relational.js",
+    "auth:create-admin": "node local-api/scripts/create-admin.js",
+    "test": "npm run test:workflow && npm run test:rbac && npm run test:tasks && npm run test:debriefs && npm run test:records && npm run test:workflow-api && npm run test:settings && npm run test:http",
+    "test:workflow": "node tests/workflow-regression.cjs",
+    "test:rbac": "node tests/local-api-rbac.cjs",
+    "test:http": "node tests/local-api-http.cjs",
+    "test:tasks": "node tests/tasks-api.cjs",
+    "test:debriefs": "node tests/debriefs-api.cjs",
+    "test:records": "node tests/records-api.cjs",
+    "test:workflow-api": "node tests/record-workflow-api.cjs",
+    "test:settings": "node tests/settings-api.cjs",
+    "test:agents-db": "node tests/agents-db.cjs",
+    "test:relational-db": "node tests/relational-db.cjs",
+    "test:e2e-db": "node tests/e2e-db.cjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.856.0",
+    "bcryptjs": "^3.0.2",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.0.1",
+    "helmet": "^8.1.0",
+    "multer": "^2.0.2",
+    "pg": "^8.16.3"
+  }
+}

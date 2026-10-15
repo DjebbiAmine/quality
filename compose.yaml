@@ -1,0 +1,21 @@
+services:
+
+  quality:
+    image: synergy-quality-center:latest
+    container_name: synergy-quality-center
+    restart: unless-stopped
+    env_file:
+      - .env
+    expose:
+      - "3000"
+    networks:
+      - sy-network
+
+
+networks:
+  sy-network:
+    name: sy-network
+    
+volumes:
+  postgres_data:
+  minio_data:

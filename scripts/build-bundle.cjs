@@ -1,0 +1,14 @@
+'use strict';
+const fs=require('node:fs');
+const path=require('node:path');
+const root=path.resolve(__dirname,'..');
+const read=name=>fs.readFileSync(path.join(root,name),'utf8');
+let html=read('index.html');
+const css=read('styles.css');
+const js=read('app.js');
+const stylesheet='<link rel="stylesheet" href="styles.css" />';
+const script='<script src="app.js"></script>';
+if(!html.includes(stylesheet)||!html.includes(script))throw new Error('index.html doit contenir les références aux sources CSS et JavaScript attendues.');
+html=html.replace(stylesheet,`<style>\n${css}\n</style>`).replace(script,`<script>\n${js}\n</script>`);
+fs.writeFileSync(path.join(root,'qualicontact-crm.html'),html);
+console.log('qualicontact-crm.html reconstruit depuis index.html, styles.css et app.js.');
