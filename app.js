@@ -1672,10 +1672,6 @@ function recordApiCall(
     });
 }
 const RECORD_PAGE_SIZE = 10;
-const recordListServerMode = () =>
-  useRecordApi() &&
-  (backend.permissions.has("records_view") ||
-    backend.permissions.has("records_manage"));
 function recordListQuery(kind = "records") {
   const f = app.filterRecords;
   if (kind === "send")
@@ -1754,31 +1750,6 @@ function scheduleRecordPageFetch(delay = 0, kind = "records") {
       render();
     }
   }, delay);
-}
-async function refreshRecordsFromServer() {
-  if (
-    !useRecordApi() ||
-    !(
-      backend.permissions.has("records_view") ||
-      backend.permissions.has("records_manage")
-    )
-  )
-    return;
-  if (backend.pendingSnapshot || backend.apiPending || backend.syncBlocked)
-    return;
-  try {
-    const active =
-      (await apiRequest("/quality/api/records?view=active")).records || [];
-    const archived = backend.permissions.has("records_manage")
-      ? (await apiRequest("/quality/api/records?view=archived")).records || []
-      : [];
-    if (backend.pendingSnapshot || backend.apiPending) return;
-    state.records = [...active, ...archived];
-    if (app.page === "records" && !modalRoot.classList.contains("open"))
-      render();
-  } catch (error) {
-    console.warn("Liste des fiches indisponible", error);
-  }
 }
 // ---- Paramètres : grilles d'évaluation et groupes d'options par routes dédiées (quality_settings).
 function adoptRouteVersion(result) {
@@ -2667,67 +2638,20 @@ function renderRecordsTable(rows, opts = {}) {
 function renderRecords() {
   const f = app.filterRecords;
   const showArchived = f.archived === "archived" && canManageRecords();
-  const serverMode = recordListServerMode();
   const filtersSig = JSON.stringify(f);
   if (app.recordFiltersSig !== filtersSig) {
     app.recordFiltersSig = filtersSig;
     app.recordPage = 1;
   }
-  let pageRows;
-  let totalRows;
-  let recordPages;
-  if (serverMode) {
-    // Filtres, tri et découpage en pages de 10 faits par le serveur.
-    const querySig = `${filtersSig}|${app.recordPage}`;
-    if (app.recordQuerySig !== querySig) {
-      app.recordQuerySig = querySig;
-      scheduleRecordPageFetch(f.search ? 250 : 0);
-    }
-    pageRows = app.recordList.rows;
-    totalRows = app.recordList.total;
-    recordPages = app.recordList.pages;
-  } else {
-    let rows = state.records.filter((r) =>
-      showArchived ? r.archived : !r.archived,
-    );
-    if (f.search) {
-      const q = f.search.toLowerCase();
-      rows = rows.filter((r) =>
-        recordSearchValues(r).some((x) =>
-          String(x || "")
-            .toLowerCase()
-            .includes(q),
-        ),
-      );
-    }
-    if (f.status !== "all") rows = rows.filter((r) => r.status === f.status);
-    if (f.campaign !== "all")
-      rows = rows.filter((r) => r.campaign === f.campaign);
-    if (f.compliance !== "all")
-      rows = rows.filter((r) => r.internal1?.conformity === f.compliance);
-    const inRange = (value, from, to) => {
-      if (!from && !to) return true;
-      const day = String(value || "").slice(0, 10);
-      if (!day) return false;
-      return (!from || day >= from) && (!to || day <= to);
-    };
-    rows = rows.filter(
-      (r) =>
-        inRange(r.callDate, f.callFrom, f.callTo) &&
-        inRange(r.closedAt, f.closedFrom, f.closedTo),
-    );
-    rows.sort(
-      (a, b) =>
-        String(b.callDate || "").localeCompare(String(a.callDate || "")) ||
-        String(b.callTime || "").localeCompare(String(a.callTime || "")) ||
-        String(b.createdAt || "").localeCompare(String(a.createdAt || "")),
-    );
-    totalRows = rows.length;
-    recordPages = Math.max(1, Math.ceil(totalRows / RECORD_PAGE_SIZE));
-    app.recordPage = Math.min(Math.max(1, app.recordPage), recordPages);
-    const pageStart = (app.recordPage - 1) * RECORD_PAGE_SIZE;
-    pageRows = rows.slice(pageStart, pageStart + RECORD_PAGE_SIZE);
+  // Filtres, tri et découpage en pages de 10 faits par le serveur.
+  const querySig = `${filtersSig}|${app.recordPage}`;
+  if (app.recordQuerySig !== querySig) {
+    app.recordQuerySig = querySig;
+    scheduleRecordPageFetch(f.search ? 250 : 0);
   }
+  const pageRows = app.recordList.rows;
+  const totalRows = app.recordList.total;
+  const recordPages = app.recordList.pages;
   const recordPageButtons = Array.from({ length: recordPages }, (_, i) => i + 1)
     .filter((n) => n === 1 || n === recordPages || Math.abs(n - app.recordPage) <= 1)
     .map(
@@ -2747,36 +2671,16 @@ function renderRecords() {
     <div class="table-wrap">${renderRecordsTable(pageRows)}</div><div class="table-footer"><span>${totalRows} fiche${totalRows === 1 ? "" : "s"} · page ${app.recordPage} / ${recordPages}</span><div class="pagination"><button data-record-page="${app.recordPage - 1}" ${app.recordPage <= 1 ? "disabled" : ""}>${ic("chevron-left")}</button>${recordPageButtons}<button data-record-page="${app.recordPage + 1}" ${app.recordPage >= recordPages ? "disabled" : ""}>${ic("chevron-right")}</button></div></div></section>`;
 }
 function renderSend() {
-  const serverMode = recordListServerMode();
   const allowed = clientSendAllowedRecords();
-  let records;
-  let totalRows;
-  let sendPages;
-  if (serverMode) {
-    // Tri par date d’appel et découpage en pages de 10 faits par le serveur.
-    const querySig = String(app.sendPage);
-    if (app.sendQuerySig !== querySig) {
-      app.sendQuerySig = querySig;
-      scheduleRecordPageFetch(0, "send");
-    }
-    records = app.sendList.rows;
-    totalRows = app.sendList.total;
-    sendPages = app.sendList.pages;
-  } else {
-    const sorted = [...allowed].sort(
-      (a, b) =>
-        String(b.callDate || "").localeCompare(String(a.callDate || "")) ||
-        String(b.callTime || "").localeCompare(String(a.callTime || "")) ||
-        String(b.createdAt || "").localeCompare(String(a.createdAt || "")),
-    );
-    totalRows = sorted.length;
-    sendPages = Math.max(1, Math.ceil(totalRows / RECORD_PAGE_SIZE));
-    app.sendPage = Math.min(Math.max(1, app.sendPage), sendPages);
-    records = sorted.slice(
-      (app.sendPage - 1) * RECORD_PAGE_SIZE,
-      app.sendPage * RECORD_PAGE_SIZE,
-    );
+  // Tri par date d’appel et découpage en pages de 10 faits par le serveur.
+  const querySig = String(app.sendPage);
+  if (app.sendQuerySig !== querySig) {
+    app.sendQuerySig = querySig;
+    scheduleRecordPageFetch(0, "send");
   }
+  const records = app.sendList.rows;
+  const totalRows = app.sendList.total;
+  const sendPages = app.sendList.pages;
   const sendPageButtons = Array.from({ length: sendPages }, (_, i) => i + 1)
     .filter((n) => n === 1 || n === sendPages || Math.abs(n - app.sendPage) <= 1)
     .map(
@@ -5104,10 +5008,8 @@ function goPage(page) {
   render();
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (page === "records") {
-    if (recordListServerMode()) {
-      app.recordQuerySig = "";
-      render();
-    } else refreshRecordsFromServer();
+    app.recordQuerySig = "";
+    render();
   }
   if (page === "settings") refreshGridsFromServer();
   if (page === "tasks") refreshTasksFromServer();
