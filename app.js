@@ -1081,6 +1081,15 @@ const app = {
   recordFiltersSig: "",
   recordQuerySig: "",
   recordList: { rows: [], total: 0, pages: 1, loaded: false, error: "" },
+  filterSend: {
+    status: "all",
+    campaign: "all",
+    callFrom: "",
+    callTo: "",
+    closedFrom: "",
+    closedTo: "",
+  },
+  sendFiltersSig: "",
   sendPage: 1,
   sendQuerySig: "",
   sendList: { rows: [], total: 0, pages: 1, loaded: false, error: "" },
@@ -1674,12 +1683,19 @@ function recordApiCall(
 const RECORD_PAGE_SIZE = 10;
 function recordListQuery(kind = "records") {
   const f = app.filterRecords;
-  if (kind === "send")
-    return new URLSearchParams({
+  if (kind === "send") {
+    const g = app.filterSend;
+    const sendParams = new URLSearchParams({
       view: "active",
       page: String(app.sendPage),
       pageSize: String(RECORD_PAGE_SIZE),
-    }).toString();
+    });
+    for (const key of ["callFrom", "callTo", "closedFrom", "closedTo"])
+      if (g[key]) sendParams.set(key, g[key]);
+    for (const key of ["status", "campaign"])
+      if (g[key] && g[key] !== "all") sendParams.set(key, g[key]);
+    return sendParams.toString();
+  }
   const params = new URLSearchParams({
     view: f.archived === "archived" && canManageRecords() ? "archived" : "active",
     page: String(app.recordPage),
@@ -1708,7 +1724,7 @@ const RECORD_LISTS = {
     setPage: (n) => (app.sendPage = n),
     setList: (list) => (app.sendList = list),
     getList: () => app.sendList,
-    sig: () => String(app.sendPage),
+    sig: () => `${app.sendFiltersSig}|${app.sendPage}`,
     setSig: (sig) => (app.sendQuerySig = sig),
   },
 };
@@ -2673,7 +2689,13 @@ function renderRecords() {
 function renderSend() {
   const allowed = clientSendAllowedRecords();
   // Tri par date d’appel et découpage en pages de 10 faits par le serveur.
-  const querySig = String(app.sendPage);
+  const g = app.filterSend;
+  const sendFiltersSig = JSON.stringify(g);
+  if (app.sendFiltersSig !== sendFiltersSig) {
+    app.sendFiltersSig = sendFiltersSig;
+    app.sendPage = 1;
+  }
+  const querySig = `${sendFiltersSig}|${app.sendPage}`;
   if (app.sendQuerySig !== querySig) {
     app.sendQuerySig = querySig;
     scheduleRecordPageFetch(0, "send");
@@ -2681,6 +2703,15 @@ function renderSend() {
   const records = app.sendList.rows;
   const totalRows = app.sendList.total;
   const sendPages = app.sendList.pages;
+  const sendStatuses = [
+    ...new Set(allowed.map((r) => r.status).filter(Boolean)),
+  ];
+  const sendCampaigns = [
+    ...new Set(allowed.map((r) => r.campaign).filter(Boolean)),
+  ];
+  const sendDateFilter = (label, from, to) =>
+    `<label class="filter-date" style="display:inline-flex;gap:6px;align-items:center;font-size:13px">${label} <input class="filter-select" type="date" data-send-filter="${from}" value="${esc(g[from])}" aria-label="${label} – début"/> → <input class="filter-select" type="date" data-send-filter="${to}" value="${esc(g[to])}" aria-label="${label} – fin"/></label>`;
+  const sendFilters = `<div class="filters-row"><button class="icon-button" type="button" data-action="clear-send-filters" title="Effacer tous les filtres" aria-label="Effacer tous les filtres">${ic("filter-x")}</button><select class="filter-select" data-send-filter="status"><option value="all">Tous les statuts</option>${sendStatuses.map((v) => `<option value="${esc(v)}" ${g.status === v ? "selected" : ""}>${esc(statusText(v))}</option>`).join("")}</select><select class="filter-select" data-send-filter="campaign"><option value="all">Toutes les campagnes</option>${sendCampaigns.map((v) => `<option value="${esc(v)}" ${g.campaign === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select>${sendDateFilter("Date d’appel", "callFrom", "callTo")}${sendDateFilter("Date de clôture", "closedFrom", "closedTo")}</div>`;
   const sendPageButtons = Array.from({ length: sendPages }, (_, i) => i + 1)
     .filter((n) => n === 1 || n === sendPages || Math.abs(n - app.sendPage) <= 1)
     .map(
@@ -2703,7 +2734,8 @@ function renderSend() {
     ${pending ? `<div class="notice-inline send-pending-notice">${ic("info")}<span>Export prêt : <strong>${esc(pending.fileName)}</strong> · ${pending.recordIds.length} fiche(s). Déposez-le sur le FTP, puis confirmez le dépôt pour tracer chaque envoi dans sa fiche.</span><button class="btn btn-secondary btn-small" data-action="confirm-client-send-ftp">Confirmer le dépôt FTP</button></div>` : ""}
     <div class="page-split"><section class="panel table-panel"><div class="panel-header"><div><h2 class="panel-title">Toutes les fiches à transmettre</h2><p class="panel-subtitle">Date, dossier, agent, indice, réponses des formulaires et libellés d’étape.</p></div>${badge(`${totalRows} disponibles`, "blue")}</div>
       ${selected.length ? `<div class="batch-summary"><span><strong>${selected.length} fiche${selected.length === 1 ? "" : "s"} sélectionnée${selected.length === 1 ? "" : "s"}</strong> · les IDs techniques restent masqués au client</span><button class="btn btn-primary btn-small" data-action="prepare-client-send-export">Préparer le téléchargement ${ic("arrow-right")}</button></div>` : ""}
-      <div class="table-wrap">${records.length ? renderRecordsTable(records, { sendMode: true }) : `<div class="empty-state"><div class="empty-icon">${ic("circle-check")}</div><strong>Aucune fiche enregistrée</strong><p>Les nouvelles fiches apparaîtront ici dès leur création.</p><button class="btn btn-secondary btn-small" data-page="records">Voir les fiches ${ic("arrow-right")}</button></div>`}</div>
+      ${sendFilters}
+      <div class="table-wrap">${records.length ? renderRecordsTable(records, { sendMode: true }) : `<div class="empty-state"><div class="empty-icon">${ic("circle-check")}</div><strong>Aucune fiche à afficher</strong><p>Ajustez les filtres ou créez une nouvelle fiche.</p><button class="btn btn-secondary btn-small" data-page="records">Voir les fiches ${ic("arrow-right")}</button></div>`}</div>
       <div class="table-footer"><span>${totalRows} fiche${totalRows === 1 ? "" : "s"} sélectionnable${totalRows === 1 ? "" : "s"} · page ${app.sendPage} / ${sendPages}</span><div class="pagination"><button data-send-page="${app.sendPage - 1}" ${app.sendPage <= 1 ? "disabled" : ""}>${ic("chevron-left")}</button>${sendPageButtons}<button data-send-page="${app.sendPage + 1}" ${app.sendPage >= sendPages ? "disabled" : ""}>${ic("chevron-right")}</button></div></div><div class="table-footer" style="border-top:0"><span>Chaque envoi confirmé est tracé dans l’historique de sa fiche; aucun écran de lot n’est créé.</span></div></section>
       <div class="stack"><section class="side-card"><h3>Envoi client</h3><p>Le qualiticien choisit librement les fiches à transmettre. Les fiches déjà envoyées restent visibles; tout nouvel envoi est ajouté à leur historique.</p><div class="metric-list"><div class="metric-line"><span>Fiches disponibles</span><strong>${totalRows}</strong></div><div class="metric-line"><span>Fiches déjà transmises</span><strong>${sentCount}</strong></div><div class="metric-line"><span>Format disponible</span><strong>Excel / ZIP / les deux</strong></div><div class="metric-line"><span>Dépôt sur FTP</span><strong>Manuel</strong></div></div></section><section class="side-card"><h3>Historique conservé</h3><p>Ouvrez une fiche pour retrouver l’audio, toutes les réponses, les libellés, les envois et les retours datés.</p><button class="btn btn-secondary btn-small btn-full" data-page="records">Consulter les fiches ${ic("arrow-right")}</button></section></div></div>`;
 }
@@ -9670,6 +9702,17 @@ function handleAction(actionEl) {
     case "open-comparison":
       openFinalReturn(actionEl.dataset.recordId || app.recordId);
       break;
+    case "clear-send-filters":
+      Object.assign(app.filterSend, {
+        status: "all",
+        campaign: "all",
+        callFrom: "",
+        callTo: "",
+        closedFrom: "",
+        closedTo: "",
+      });
+      render();
+      break;
     case "clear-record-filters":
       Object.assign(app.filterRecords, {
         search: "",
@@ -9994,6 +10037,12 @@ document.addEventListener("change", (event) => {
   }
   if (event.target.matches('[data-filter="compliance"]')) {
     app.filterRecords.compliance = event.target.value;
+    render();
+    return;
+  }
+  const sendKey = event.target.dataset?.sendFilter;
+  if (sendKey && sendKey in app.filterSend) {
+    app.filterSend[sendKey] = event.target.value;
     render();
     return;
   }
