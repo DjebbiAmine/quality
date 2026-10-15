@@ -19,3 +19,9 @@ CREATE INDEX IF NOT EXISTS crm_records_campaign_list_idx
 
 -- Filtre de conformité Synergy #1 : l'évaluation courante par fiche est déjà couverte par
 -- crm_record_evaluations_current_uq (record_id, stage) WHERE is_current.
+
+-- Menu « À envoyer au client » : fiches non archivées et non clôturées (liste paginée + compteur du menu).
+-- Le prédicat doit rester identique à celui de relational-store.js (filters.toSend).
+CREATE INDEX IF NOT EXISTS crm_records_send_idx
+  ON public.crm_records (call_date DESC NULLS LAST, call_time DESC NULLS LAST, created_at DESC NULLS LAST, id DESC)
+  WHERE archived = false AND status IS DISTINCT FROM 'cloture';

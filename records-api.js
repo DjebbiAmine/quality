@@ -8,7 +8,7 @@
 // Le serveur attribue le numéro de fiche, impose le nom du qualiticien, vérifie l'agent et l'audio, crée la tâche automatique
 // « Évaluer l'appel » et écrit le journal. Chaque écriture verrouille puis incrémente la version globale de l'état : un
 // navigateur resté sur l'ancienne sauvegarde d'état complet reçoit un conflit de version (puis fusionne) au lieu d'écraser la fiche.
-const { loadRecords, loadRecordsPage, lockRecord, saveRecord, nextRecordId, loadTasks, saveTask, saveEvent } = require('./relational-store');
+const { loadRecords, loadRecordsPage, countRecords, lockRecord, saveRecord, nextRecordId, loadTasks, saveTask, saveEvent } = require('./relational-store');
 const { filterStateForUser, isClientScopedAuth, recordAssignedTo, normalizeAgentText, normalizeEmployeeCode } = require('./rbac');
 const { fail, hasPermission, isRealDate, eventFor, makeTransaction, bumpStateVersion } = require('./api-common');
 
@@ -127,6 +127,8 @@ function buildRecordAudio(row, auth) {
 
 function registerRecordRoutes(app, { pool, requireAuth, requireReadyPassword, requirePermission, requireAnyPermission, assignableUsers, audit }) {
   const readGuard = [requireAuth, requireReadyPassword, requireAnyPermission(['records_view', 'records_manage'])];
+  // Liste et KPI : le menu « À envoyer au client » (client_send) lit aussi les fiches.
+  const listGuard = [requireAuth, requireReadyPassword, requireAnyPermission(['records_view', 'records_manage', 'client_send'])];
   const writeGuard = [requireAuth, requireReadyPassword, requirePermission('records_manage')];
   const inTransaction = makeTransaction(pool);
 
@@ -154,7 +156,7 @@ function registerRecordRoutes(app, { pool, requireAuth, requireReadyPassword, re
   const isoDay = (value) => { const text = String(value || '').trim(); return text === '' ? '' : isRealDate(text) ? text : null; };
   // Liste paginée : filtres, droits, recherche, tri et LIMIT/OFFSET sont exécutés par PostgreSQL (index crm_records_list_idx).
   // Seuls les profils portail client, dont la visibilité dépend de l'historique d'envoi, passent par le calcul en mémoire.
-  app.get('/quality/api/records', ...readGuard, async (req, res) => {
+  app.get('/quality/api/records', ...listGuard, async (req, res) => {
     const view = String(req.query.view || 'active');
     if (!['active', 'archived'].includes(view)) throw fail(400, 'RECORD_INVALID', 'Vue inconnue.');
     if (view === 'archived' && !hasPermission(req.auth, 'records_manage')) throw fail(403, 'PERMISSION_DENIED', 'Permission requise : records_manage.', { missingPermissions: ['records_manage'] });
@@ -198,6 +200,17 @@ function registerRecordRoutes(app, { pool, requireAuth, requireReadyPassword, re
     const result = await loadRecordsPage(pool, { archived: view === 'archived', filters, search, compliance, scope, page, pageSize });
     // Les fiches de la page repassent par le filtre de champs autorisés (internal1/2, retours client, envoi…).
     res.json({ records: toVisible(result.records, req.auth), pagination: result.pagination });
+  });
+  // KPI du menu « À envoyer au client » : fiches non archivées dont le statut n'est pas « clôturée » (comptage SQL, sans charger les fiches).
+  app.get('/quality/api/records/kpi', ...listGuard, async (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    if (isClientScopedAuth(req.auth)) {
+      const toSend = toVisible(await loadRecords(pool, { archived: false }), req.auth).filter((record) => record.status !== 'cloture').length;
+      return res.json({ toSend });
+    }
+    const scope = {};
+    if (!hasPermission(req.auth, 'records_view_all')) { scope.restrictedUserId = String(req.auth.id || ''); scope.restrictedName = normalizeAgentText(req.auth.fullName || ''); }
+    res.json({ toSend: await countRecords(pool, { archived: false, filters: { toSend: true }, scope }) });
   });
   app.get('/quality/api/records/:id', ...readGuard, async (req, res) => {
     const [record] = toVisible(await loadRecords(pool, { ids: [String(req.params.id)] }), req.auth);

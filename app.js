@@ -1672,6 +1672,7 @@ function recordApiCall(
       if (afterApply) afterApply(result);
       app.recordQuerySig = "";
       app.sendQuerySig = "";
+      refreshSendKpi();
       render();
       toast(successMessage, tone);
     })
@@ -4610,6 +4611,32 @@ async function reloadRemoteState() {
   replaceStateFromServer(result.data, result.version);
   return result;
 }
+// KPI du menu « À envoyer au client » : fiches non archivées et non clôturées, comptées par le serveur.
+async function refreshSendKpi() {
+  if (!useRecordApi() || backend.sendKpiLoading) return;
+  backend.sendKpiLoading = true;
+  try {
+    const result = await apiRequest("/quality/api/records/kpi");
+    backend.sendCount = Number(result.toSend) || 0;
+    syncSendNavCount();
+  } catch (error) {
+    console.warn("KPI « À envoyer au client » indisponible", error);
+    if (backend.sendCount === undefined) backend.sendCount = 0;
+  } finally {
+    backend.sendKpiLoading = false;
+  }
+}
+function syncSendNavCount() {
+  const sendNav = document.querySelector('[data-nav-count="send"]');
+  if (!sendNav) return;
+  const count = backend.sendCount || 0;
+  sendNav.textContent = String(count);
+  sendNav.hidden =
+    !count ||
+    (backend.enabled &&
+      backend.authenticated &&
+      !backend.permissions.has("client_send"));
+}
 async function refreshDashboardData() {
   if (
     !backend.enabled ||
@@ -5006,16 +5033,8 @@ function render() {
       if (permission && !backend.permissions.has(permission)) el.hidden = true;
     });
   }
-  const sendNav = document.querySelector('[data-nav-count="send"]');
-  if (sendNav) {
-    const count = clientSendAllowedRecords().length;
-    sendNav.textContent = String(count);
-    sendNav.hidden =
-      !count ||
-      (backend.enabled &&
-        backend.authenticated &&
-        !backend.permissions.has("client_send"));
-  }
+  syncSendNavCount();
+  if (backend.sendCount === undefined) refreshSendKpi();
   syncCurrentDemoUserHeader();
   bindAudio();
 }
@@ -5036,7 +5055,10 @@ function goPage(page) {
   app.page = page;
   if (page === "record" && !app.recordId) app.recordId = state.records[0]?.id;
   closeSidebar();
-  if (page === "send") app.sendQuerySig = "";
+  if (page === "send") {
+    app.sendQuerySig = "";
+    refreshSendKpi();
+  }
   render();
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (page === "records") {

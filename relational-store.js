@@ -159,6 +159,8 @@ function buildRecordListWhere({archived,filters={},search='',compliance='',scope
     params.push(scope.restrictedName||'');const nameRef=`$${params.length}`;
     where.push(`((nullif(btrim(r.responsible_id),'') is not null and r.responsible_id = ${idRef}) or (nullif(btrim(r.responsible_id),'') is null and ${nameRef} <> '' and ${SQL_NORM_TEXT('r.responsible')} = ${nameRef}))`);
   }
+  // « À envoyer au client » : fiches non clôturées (littéral, pour pouvoir utiliser l'index partiel crm_records_send_idx).
+  if(filters.toSend)where.push("r.status is distinct from 'cloture'");
   if(filters.status)add('r.status = ?',filters.status);
   if(filters.campaign)add('r.campaign = ?',filters.campaign);
   if(filters.callFrom)add('r.call_date >= ?::date',filters.callFrom);
@@ -183,6 +185,11 @@ function buildRecordListWhere({archived,filters={},search='',compliance='',scope
     where.push(`(${parts.join(' or ')})`);
   }
   return {whereSql:where.join(' and '),params};
+}
+// KPI : nombre de fiches visibles correspondant aux filtres (sans composer les fiches).
+async function countRecords(db,{archived=false,filters,scope}={}){
+  const {whereSql,params}=buildRecordListWhere({archived,filters,scope});
+  return (await db.query(`select count(*)::int as n from public.crm_records r where ${whereSql}`,params)).rows[0].n;
 }
 async function loadRecordsPage(db,{archived=false,filters,search,compliance,scope,page=1,pageSize=10}){
   const {whereSql,params}=buildRecordListWhere({archived,filters,search,compliance,scope});
@@ -587,4 +594,4 @@ function canonicalizeRelational(state){
 }
 
 const RELATIONAL_KEYS=['records','events','batches','tasks','debriefs','criteriaByStage','optionGroups'];
-module.exports={loadGrids,saveOptionGroup,saveCriterion,deleteCriterionRow,deleteOptionGroupRow,loadRecords,loadRecordsPage,lockRecord,saveRecord,nextRecordId,loadDebriefs,lockDebrief,saveDebrief,nextDebriefId,loadTasks,lockTask,saveTask,saveEvent,canonicalizeRelational,loadRelational,insertRelational,persistRelational,diffStates,counts,looseEqual,loose,RELATIONAL_KEYS,STAGES};
+module.exports={loadGrids,saveOptionGroup,saveCriterion,deleteCriterionRow,deleteOptionGroupRow,loadRecords,loadRecordsPage,countRecords,lockRecord,saveRecord,nextRecordId,loadDebriefs,lockDebrief,saveDebrief,nextDebriefId,loadTasks,lockTask,saveTask,saveEvent,canonicalizeRelational,loadRelational,insertRelational,persistRelational,diffStates,counts,looseEqual,loose,RELATIONAL_KEYS,STAGES};
