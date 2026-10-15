@@ -1081,6 +1081,9 @@ const app = {
   recordFiltersSig: "",
   recordQuerySig: "",
   recordList: { rows: [], total: 0, pages: 1, loaded: false, error: "" },
+  sendPage: 1,
+  sendQuerySig: "",
+  sendList: { rows: [], total: 0, pages: 1, loaded: false, error: "" },
   debriefView: "active",
   debriefFilters: { agent: "", dossier: "", note: "", score: "" },
   debriefPage: 1,
@@ -1659,6 +1662,7 @@ function recordApiCall(
       applyRecordResult(result);
       if (afterApply) afterApply(result);
       app.recordQuerySig = "";
+      app.sendQuerySig = "";
       render();
       toast(successMessage, tone);
     })
@@ -1672,10 +1676,14 @@ const recordListServerMode = () =>
   useRecordApi() &&
   (backend.permissions.has("records_view") ||
     backend.permissions.has("records_manage"));
-let recordFetchTimer = null;
-let recordFetchToken = 0;
-function recordListQuery() {
+function recordListQuery(kind = "records") {
   const f = app.filterRecords;
+  if (kind === "send")
+    return new URLSearchParams({
+      view: "active",
+      page: String(app.sendPage),
+      pageSize: String(RECORD_PAGE_SIZE),
+    }).toString();
   const params = new URLSearchParams({
     view: f.archived === "archived" && canManageRecords() ? "archived" : "active",
     page: String(app.recordPage),
@@ -1687,16 +1695,40 @@ function recordListQuery() {
     if (f[key] && f[key] !== "all") params.set(key, f[key]);
   return params.toString();
 }
+// Deux listes paginées par le serveur (10 fiches par page) : « Fiches d’appel » (avec filtres) et « À envoyer au client ».
+const RECORD_LISTS = {
+  records: {
+    page: "records",
+    getPage: () => app.recordPage,
+    setPage: (n) => (app.recordPage = n),
+    setList: (list) => (app.recordList = list),
+    getList: () => app.recordList,
+    sig: () => `${app.recordFiltersSig}|${app.recordPage}`,
+    setSig: (sig) => (app.recordQuerySig = sig),
+  },
+  send: {
+    page: "send",
+    getPage: () => app.sendPage,
+    setPage: (n) => (app.sendPage = n),
+    setList: (list) => (app.sendList = list),
+    getList: () => app.sendList,
+    sig: () => String(app.sendPage),
+    setSig: (sig) => (app.sendQuerySig = sig),
+  },
+};
+const recordFetchTimers = {};
+const recordFetchTokens = { records: 0, send: 0 };
 // Récupère uniquement la page courante (10 fiches) filtrée et triée par le serveur.
-function scheduleRecordPageFetch(delay = 0) {
-  clearTimeout(recordFetchTimer);
-  const token = ++recordFetchToken;
-  recordFetchTimer = setTimeout(async () => {
+function scheduleRecordPageFetch(delay = 0, kind = "records") {
+  const list = RECORD_LISTS[kind];
+  clearTimeout(recordFetchTimers[kind]);
+  const token = ++recordFetchTokens[kind];
+  recordFetchTimers[kind] = setTimeout(async () => {
     try {
       const result = await apiRequest(
-        `/quality/api/records?${recordListQuery()}`,
+        `/quality/api/records?${recordListQuery(kind)}`,
       );
-      if (token !== recordFetchToken) return;
+      if (token !== recordFetchTokens[kind]) return;
       const rows = result.records || [];
       for (const row of rows) {
         const index = state.records.findIndex((r) => r.id === row.id);
@@ -1704,21 +1736,21 @@ function scheduleRecordPageFetch(delay = 0) {
         else state.records.push(row);
       }
       const pagination = result.pagination || {};
-      app.recordPage = pagination.page || 1;
-      app.recordList = {
+      list.setPage(pagination.page || 1);
+      list.setList({
         rows,
         total: pagination.total ?? rows.length,
         pages: pagination.pages || 1,
         loaded: true,
         error: "",
-      };
+      });
     } catch (error) {
-      if (token !== recordFetchToken) return;
-      app.recordList = { ...app.recordList, loaded: true, error: error.message };
+      if (token !== recordFetchTokens[kind]) return;
+      list.setList({ ...list.getList(), loaded: true, error: error.message });
       console.warn("Liste des fiches indisponible", error);
     }
-    if (app.page === "records" && !modalRoot.classList.contains("open")) {
-      app.recordQuerySig = `${app.recordFiltersSig}|${app.recordPage}`;
+    if (app.page === list.page && !modalRoot.classList.contains("open")) {
+      list.setSig(list.sig());
       render();
     }
   }, delay);
@@ -2715,11 +2747,45 @@ function renderRecords() {
     <div class="table-wrap">${renderRecordsTable(pageRows)}</div><div class="table-footer"><span>${totalRows} fiche${totalRows === 1 ? "" : "s"} · page ${app.recordPage} / ${recordPages}</span><div class="pagination"><button data-record-page="${app.recordPage - 1}" ${app.recordPage <= 1 ? "disabled" : ""}>${ic("chevron-left")}</button>${recordPageButtons}<button data-record-page="${app.recordPage + 1}" ${app.recordPage >= recordPages ? "disabled" : ""}>${ic("chevron-right")}</button></div></div></section>`;
 }
 function renderSend() {
-  const records = clientSendAllowedRecords().sort((a, b) =>
-    String(b.createdAt || "").localeCompare(String(a.createdAt || "")),
-  );
+  const serverMode = recordListServerMode();
+  const allowed = clientSendAllowedRecords();
+  let records;
+  let totalRows;
+  let sendPages;
+  if (serverMode) {
+    // Tri par date d’appel et découpage en pages de 10 faits par le serveur.
+    const querySig = String(app.sendPage);
+    if (app.sendQuerySig !== querySig) {
+      app.sendQuerySig = querySig;
+      scheduleRecordPageFetch(0, "send");
+    }
+    records = app.sendList.rows;
+    totalRows = app.sendList.total;
+    sendPages = app.sendList.pages;
+  } else {
+    const sorted = [...allowed].sort(
+      (a, b) =>
+        String(b.callDate || "").localeCompare(String(a.callDate || "")) ||
+        String(b.callTime || "").localeCompare(String(a.callTime || "")) ||
+        String(b.createdAt || "").localeCompare(String(a.createdAt || "")),
+    );
+    totalRows = sorted.length;
+    sendPages = Math.max(1, Math.ceil(totalRows / RECORD_PAGE_SIZE));
+    app.sendPage = Math.min(Math.max(1, app.sendPage), sendPages);
+    records = sorted.slice(
+      (app.sendPage - 1) * RECORD_PAGE_SIZE,
+      app.sendPage * RECORD_PAGE_SIZE,
+    );
+  }
+  const sendPageButtons = Array.from({ length: sendPages }, (_, i) => i + 1)
+    .filter((n) => n === 1 || n === sendPages || Math.abs(n - app.sendPage) <= 1)
+    .map(
+      (n, i, list) =>
+        `${i && n - list[i - 1] > 1 ? "<span>…</span>" : ""}<button class="page-num${n === app.sendPage ? " active" : ""}" data-send-page="${n}">${n}</button>`,
+    )
+    .join("");
   const selected = [...app.selectedToSend].filter((id) =>
-    records.some((r) => r.id === id),
+    allowed.some((r) => r.id === id),
   );
   const sentCount = state.records.filter(
     (r) => !r.archived && hasBeenSentToClient(r),
@@ -2729,13 +2795,13 @@ function renderSend() {
     ? `<button class="btn btn-primary" data-action="prepare-client-send-export">${ic("download")} Préparer l’envoi (${selected.length})</button>`
     : "";
   return `${pageHeading("À envoyer au client", "Toutes les fiches sont disponibles. Sélectionnez celles à transmettre; le dépôt sur le FTP reste manuel.", actions)}
-    <div class="step-strip send-workflow"><div class="step-item complete"><span class="step-number">${ic("circle-check")}</span><span class="step-copy"><strong>Fiches disponibles</strong><small>Tous statuts et toutes évaluations</small></span></div><div class="step-item current"><span class="step-number">2</span><span class="step-copy"><strong>Choix des fiches</strong><small>${records.length} disponible${records.length === 1 ? "" : "s"} · ${selected.length} sélectionnée${selected.length === 1 ? "" : "s"}</small></span></div><div class="step-item"><span class="step-number">3</span><span class="step-copy"><strong>Export et dépôt FTP</strong><small>Excel, ZIP audio ou les deux</small></span></div></div>
+    <div class="step-strip send-workflow"><div class="step-item complete"><span class="step-number">${ic("circle-check")}</span><span class="step-copy"><strong>Fiches disponibles</strong><small>Tous statuts et toutes évaluations</small></span></div><div class="step-item current"><span class="step-number">2</span><span class="step-copy"><strong>Choix des fiches</strong><small>${totalRows} disponible${totalRows === 1 ? "" : "s"} · ${selected.length} sélectionnée${selected.length === 1 ? "" : "s"}</small></span></div><div class="step-item"><span class="step-number">3</span><span class="step-copy"><strong>Export et dépôt FTP</strong><small>Excel, ZIP audio ou les deux</small></span></div></div>
     ${pending ? `<div class="notice-inline send-pending-notice">${ic("info")}<span>Export prêt : <strong>${esc(pending.fileName)}</strong> · ${pending.recordIds.length} fiche(s). Déposez-le sur le FTP, puis confirmez le dépôt pour tracer chaque envoi dans sa fiche.</span><button class="btn btn-secondary btn-small" data-action="confirm-client-send-ftp">Confirmer le dépôt FTP</button></div>` : ""}
-    <div class="page-split"><section class="panel table-panel"><div class="panel-header"><div><h2 class="panel-title">Toutes les fiches à transmettre</h2><p class="panel-subtitle">Date, dossier, agent, indice, réponses des formulaires et libellés d’étape.</p></div>${badge(`${records.length} disponibles`, "blue")}</div>
+    <div class="page-split"><section class="panel table-panel"><div class="panel-header"><div><h2 class="panel-title">Toutes les fiches à transmettre</h2><p class="panel-subtitle">Date, dossier, agent, indice, réponses des formulaires et libellés d’étape.</p></div>${badge(`${totalRows} disponibles`, "blue")}</div>
       ${selected.length ? `<div class="batch-summary"><span><strong>${selected.length} fiche${selected.length === 1 ? "" : "s"} sélectionnée${selected.length === 1 ? "" : "s"}</strong> · les IDs techniques restent masqués au client</span><button class="btn btn-primary btn-small" data-action="prepare-client-send-export">Préparer le téléchargement ${ic("arrow-right")}</button></div>` : ""}
       <div class="table-wrap">${records.length ? renderRecordsTable(records, { sendMode: true }) : `<div class="empty-state"><div class="empty-icon">${ic("circle-check")}</div><strong>Aucune fiche enregistrée</strong><p>Les nouvelles fiches apparaîtront ici dès leur création.</p><button class="btn btn-secondary btn-small" data-page="records">Voir les fiches ${ic("arrow-right")}</button></div>`}</div>
-      <div class="table-footer"><span>${records.length} fiche${records.length === 1 ? "" : "s"} sélectionnable${records.length === 1 ? "" : "s"}</span><span>Chaque envoi confirmé est tracé dans l’historique de sa fiche; aucun écran de lot n’est créé.</span></div></section>
-      <div class="stack"><section class="side-card"><h3>Envoi client</h3><p>Le qualiticien choisit librement les fiches à transmettre. Les fiches déjà envoyées restent visibles; tout nouvel envoi est ajouté à leur historique.</p><div class="metric-list"><div class="metric-line"><span>Fiches disponibles</span><strong>${records.length}</strong></div><div class="metric-line"><span>Fiches déjà transmises</span><strong>${sentCount}</strong></div><div class="metric-line"><span>Format disponible</span><strong>Excel / ZIP / les deux</strong></div><div class="metric-line"><span>Dépôt sur FTP</span><strong>Manuel</strong></div></div></section><section class="side-card"><h3>Historique conservé</h3><p>Ouvrez une fiche pour retrouver l’audio, toutes les réponses, les libellés, les envois et les retours datés.</p><button class="btn btn-secondary btn-small btn-full" data-page="records">Consulter les fiches ${ic("arrow-right")}</button></section></div></div>`;
+      <div class="table-footer"><span>${totalRows} fiche${totalRows === 1 ? "" : "s"} sélectionnable${totalRows === 1 ? "" : "s"} · page ${app.sendPage} / ${sendPages}</span><div class="pagination"><button data-send-page="${app.sendPage - 1}" ${app.sendPage <= 1 ? "disabled" : ""}>${ic("chevron-left")}</button>${sendPageButtons}<button data-send-page="${app.sendPage + 1}" ${app.sendPage >= sendPages ? "disabled" : ""}>${ic("chevron-right")}</button></div></div><div class="table-footer" style="border-top:0"><span>Chaque envoi confirmé est tracé dans l’historique de sa fiche; aucun écran de lot n’est créé.</span></div></section>
+      <div class="stack"><section class="side-card"><h3>Envoi client</h3><p>Le qualiticien choisit librement les fiches à transmettre. Les fiches déjà envoyées restent visibles; tout nouvel envoi est ajouté à leur historique.</p><div class="metric-list"><div class="metric-line"><span>Fiches disponibles</span><strong>${totalRows}</strong></div><div class="metric-line"><span>Fiches déjà transmises</span><strong>${sentCount}</strong></div><div class="metric-line"><span>Format disponible</span><strong>Excel / ZIP / les deux</strong></div><div class="metric-line"><span>Dépôt sur FTP</span><strong>Manuel</strong></div></div></section><section class="side-card"><h3>Historique conservé</h3><p>Ouvrez une fiche pour retrouver l’audio, toutes les réponses, les libellés, les envois et les retours datés.</p><button class="btn btn-secondary btn-small btn-full" data-page="records">Consulter les fiches ${ic("arrow-right")}</button></section></div></div>`;
 }
 function clientSendStem(id) {
   return `Envoi-client_${TODAY}_${safeArchiveName(id)}`;
@@ -5034,6 +5100,7 @@ function goPage(page) {
   app.page = page;
   if (page === "record" && !app.recordId) app.recordId = state.records[0]?.id;
   closeSidebar();
+  if (page === "send") app.sendQuerySig = "";
   render();
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (page === "records") {
@@ -9812,6 +9879,14 @@ document.addEventListener("click", (event) => {
   }
   if (!searchResults.contains(event.target) && event.target !== searchInput)
     searchResults.classList.remove("open");
+  const sendPager = event.target.closest("[data-send-page]");
+  if (sendPager) {
+    if (!sendPager.disabled) {
+      app.sendPage = Number(sendPager.dataset.sendPage) || 1;
+      render();
+    }
+    return;
+  }
   const recordPager = event.target.closest("[data-record-page]");
   if (recordPager) {
     if (!recordPager.disabled) {
