@@ -8,8 +8,8 @@
 // Le serveur attribue le numéro de fiche, impose le nom du qualiticien, vérifie l'agent et l'audio, crée la tâche automatique
 // « Évaluer l'appel » et écrit le journal. Chaque écriture verrouille puis incrémente la version globale de l'état : un
 // navigateur resté sur l'ancienne sauvegarde d'état complet reçoit un conflit de version (puis fusionne) au lieu d'écraser la fiche.
-const { loadRecords, lockRecord, saveRecord, nextRecordId, loadTasks, saveTask, saveEvent } = require('./relational-store');
-const { filterStateForUser, recordAssignedTo, normalizeAgentText, normalizeEmployeeCode } = require('./rbac');
+const { loadRecords, loadRecordsPage, lockRecord, saveRecord, nextRecordId, loadTasks, saveTask, saveEvent } = require('./relational-store');
+const { filterStateForUser, isClientScopedAuth, recordAssignedTo, normalizeAgentText, normalizeEmployeeCode } = require('./rbac');
 const { fail, hasPermission, isRealDate, eventFor, makeTransaction, bumpStateVersion } = require('./api-common');
 
 const TEXT_FIELDS = ['campaign', 'campaignCode', 'agentCivility', 'agentCodeFromFilename', 'callTime', 'duration', 'extension', 'clientRef', 'recordIndex', 'baseName', 'rawSegment1', 'rawSegment6', 'rawSegment7', 'clientCall1Status'];
@@ -151,12 +151,53 @@ function registerRecordRoutes(app, { pool, requireAuth, requireReadyPassword, re
   const visible = (record, auth) => hasPermission(auth, 'records_view_all') || recordAssignedTo(record, auth);
   const toVisible = (records, auth) => filterStateForUser({ records }, auth).records;
 
+  const isoDay = (value) => { const text = String(value || '').trim(); return text === '' ? '' : isRealDate(text) ? text : null; };
+  // Liste paginée : filtres, droits, recherche, tri et LIMIT/OFFSET sont exécutés par PostgreSQL (index crm_records_list_idx).
+  // Seuls les profils portail client, dont la visibilité dépend de l'historique d'envoi, passent par le calcul en mémoire.
   app.get('/quality/api/records', ...readGuard, async (req, res) => {
     const view = String(req.query.view || 'active');
     if (!['active', 'archived'].includes(view)) throw fail(400, 'RECORD_INVALID', 'Vue inconnue.');
     if (view === 'archived' && !hasPermission(req.auth, 'records_manage')) throw fail(403, 'PERMISSION_DENIED', 'Permission requise : records_manage.', { missingPermissions: ['records_manage'] });
-    const records = toVisible(await loadRecords(pool, { archived: view === 'archived' }), req.auth);
-    res.set('Cache-Control', 'private, no-store'); res.json({ records });
+    res.set('Cache-Control', 'private, no-store');
+    if (req.query.page === undefined) {
+      const records = toVisible(await loadRecords(pool, { archived: view === 'archived' }), req.auth);
+      return res.json({ records });
+    }
+    const page = Number(req.query.page);
+    const pageSize = req.query.pageSize === undefined ? 10 : Number(req.query.pageSize);
+    if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw fail(400, 'RECORD_INVALID', 'Pagination invalide (page ≥ 1, pageSize entre 1 et 100).');
+    const days = {};
+    for (const key of ['callFrom', 'callTo', 'closedFrom', 'closedTo']) {
+      const day = isoDay(req.query[key]);
+      if (day === null) throw fail(400, 'RECORD_INVALID', 'Date de filtre invalide (AAAA-MM-JJ).');
+      days[key] = day;
+    }
+    const text = (key) => { const value = String(req.query[key] || '').trim(); return value && value !== 'all' ? value.slice(0, 200) : ''; };
+    const filters = { status: text('status'), campaign: text('campaign'), ...days };
+    const compliance = text('compliance');
+    const search = text('search');
+    if (isClientScopedAuth(req.auth)) {
+      const normText = (value) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const query = normText(search);
+      let records = toVisible(await loadRecords(pool, { archived: view === 'archived' }), req.auth);
+      const inRange = (value, from, to) => { const day = String(value || '').slice(0, 10); return (!from && !to) || (day && (!from || day >= from) && (!to || day <= to)); };
+      records = records.filter((r) => (!filters.status || r.status === filters.status) && (!filters.campaign || r.campaign === filters.campaign)
+        && inRange(r.callDate, filters.callFrom, filters.callTo) && inRange(r.closedAt, filters.closedFrom, filters.closedTo)
+        && (!compliance || r.internal1?.conformity === compliance) && (!query || [r.id, r.agent, r.client, r.campaign, r.recordIndex, r.baseName, r.sourceFilename].some((value) => normText(value).includes(query))));
+      records.sort((a, b) => String(b.callDate || '').localeCompare(String(a.callDate || '')) || String(b.callTime || '').localeCompare(String(a.callTime || '')) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+      const total = records.length;
+      const pages = Math.max(1, Math.ceil(total / pageSize));
+      const current = Math.min(page, pages);
+      return res.json({ records: records.slice((current - 1) * pageSize, current * pageSize), pagination: { page: current, pageSize, total, pages } });
+    }
+    const scope = {
+      canInternal1: hasPermission(req.auth, 'synergy1'), canInternal2: hasPermission(req.auth, 'reevaluation'),
+      canClientReturns: hasPermission(req.auth, 'client_returns'), canFinalReturn: hasPermission(req.auth, 'final_return'), canClientSend: hasPermission(req.auth, 'client_send')
+    };
+    if (!hasPermission(req.auth, 'records_view_all')) { scope.restrictedUserId = String(req.auth.id || ''); scope.restrictedName = normalizeAgentText(req.auth.fullName || ''); }
+    const result = await loadRecordsPage(pool, { archived: view === 'archived', filters, search, compliance, scope, page, pageSize });
+    // Les fiches de la page repassent par le filtre de champs autorisés (internal1/2, retours client, envoi…).
+    res.json({ records: toVisible(result.records, req.auth), pagination: result.pagination });
   });
   app.get('/quality/api/records/:id', ...readGuard, async (req, res) => {
     const [record] = toVisible(await loadRecords(pool, { ids: [String(req.params.id)] }), req.auth);

@@ -134,6 +134,14 @@ function assignedToUser(idValue,nameValue,auth){
 }
 function recordAssignedTo(record,auth){return assignedToUser(record?.responsibleId,record?.responsible,auth)}
 function taskAssignedTo(task,auth){return assignedToUser(task?.assignedToId,task?.assignedTo,auth)}
+// Profil client (portail) : n'accède qu'aux fiches de ses clients, déjà envoyées. Même règle que filterStateForUser.
+function isClientScopedAuth(auth) {
+  const permissions=auth?.permissions||new Set();
+  const can=code=>permissions instanceof Set?permissions.has(code):Array.isArray(permissions)&&permissions.includes(code);
+  const clientIds=(auth?.clientIds||[]);const roles=Array.isArray(auth?.roles)?auth.roles:[];
+  const organizationRecordAccess=roles.some(role=>role?.scope==='organization')&&can('records_view');
+  return (clientIds.length>0||roles.some(role=>role?.scope==='assigned_client'))&&!organizationRecordAccess;
+}
 function filterStateForUser(data,auth) {
   const source=JSON.parse(JSON.stringify(data||{}));
   delete source.users;delete source.roles;delete source.userRoleAssignments;
@@ -181,4 +189,4 @@ function filterStateForUser(data,auth) {
   return source;
 }
 
-module.exports={recordAssignedTo,taskAssignedTo,ALL_ACTIVITY_IDS,DEBRIEF_RATING_KEYS,stable,same,normalizeAgentText,normalizeEmployeeCode,sameAgentIdentity,getClientReturns,latestClientReturn,isEvaluated,needsReevaluation,debriefRatingStats,dashboardAgentRows,calculateDashboardSummary,filterStateForUser};
+module.exports={isClientScopedAuth,recordAssignedTo,taskAssignedTo,ALL_ACTIVITY_IDS,DEBRIEF_RATING_KEYS,stable,same,normalizeAgentText,normalizeEmployeeCode,sameAgentIdentity,getClientReturns,latestClientReturn,isEvaluated,needsReevaluation,debriefRatingStats,dashboardAgentRows,calculateDashboardSummary,filterStateForUser};

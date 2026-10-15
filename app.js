@@ -1077,6 +1077,10 @@ const app = {
     closedFrom: "",
     closedTo: "",
   },
+  recordPage: 1,
+  recordFiltersSig: "",
+  recordQuerySig: "",
+  recordList: { rows: [], total: 0, pages: 1, loaded: false, error: "" },
   debriefView: "active",
   debriefFilters: { agent: "", dossier: "", note: "", score: "" },
   debriefPage: 1,
@@ -1654,6 +1658,7 @@ function recordApiCall(
     .then((result) => {
       applyRecordResult(result);
       if (afterApply) afterApply(result);
+      app.recordQuerySig = "";
       render();
       toast(successMessage, tone);
     })
@@ -1661,6 +1666,62 @@ function recordApiCall(
     .finally(() => {
       backend.apiPending = Math.max(0, (backend.apiPending || 1) - 1);
     });
+}
+const RECORD_PAGE_SIZE = 10;
+const recordListServerMode = () =>
+  useRecordApi() &&
+  (backend.permissions.has("records_view") ||
+    backend.permissions.has("records_manage"));
+let recordFetchTimer = null;
+let recordFetchToken = 0;
+function recordListQuery() {
+  const f = app.filterRecords;
+  const params = new URLSearchParams({
+    view: f.archived === "archived" && canManageRecords() ? "archived" : "active",
+    page: String(app.recordPage),
+    pageSize: String(RECORD_PAGE_SIZE),
+  });
+  for (const key of ["search", "callFrom", "callTo", "closedFrom", "closedTo"])
+    if (f[key]) params.set(key, f[key]);
+  for (const key of ["status", "campaign", "compliance"])
+    if (f[key] && f[key] !== "all") params.set(key, f[key]);
+  return params.toString();
+}
+// Récupère uniquement la page courante (10 fiches) filtrée et triée par le serveur.
+function scheduleRecordPageFetch(delay = 0) {
+  clearTimeout(recordFetchTimer);
+  const token = ++recordFetchToken;
+  recordFetchTimer = setTimeout(async () => {
+    try {
+      const result = await apiRequest(
+        `/quality/api/records?${recordListQuery()}`,
+      );
+      if (token !== recordFetchToken) return;
+      const rows = result.records || [];
+      for (const row of rows) {
+        const index = state.records.findIndex((r) => r.id === row.id);
+        if (index >= 0) state.records[index] = row;
+        else state.records.push(row);
+      }
+      const pagination = result.pagination || {};
+      app.recordPage = pagination.page || 1;
+      app.recordList = {
+        rows,
+        total: pagination.total ?? rows.length,
+        pages: pagination.pages || 1,
+        loaded: true,
+        error: "",
+      };
+    } catch (error) {
+      if (token !== recordFetchToken) return;
+      app.recordList = { ...app.recordList, loaded: true, error: error.message };
+      console.warn("Liste des fiches indisponible", error);
+    }
+    if (app.page === "records" && !modalRoot.classList.contains("open")) {
+      app.recordQuerySig = `${app.recordFiltersSig}|${app.recordPage}`;
+      render();
+    }
+  }, delay);
 }
 async function refreshRecordsFromServer() {
   if (
@@ -2574,36 +2635,74 @@ function renderRecordsTable(rows, opts = {}) {
 function renderRecords() {
   const f = app.filterRecords;
   const showArchived = f.archived === "archived" && canManageRecords();
-  let rows = state.records.filter((r) =>
-    showArchived ? r.archived : !r.archived,
-  );
-  if (f.search) {
-    const q = f.search.toLowerCase();
-    rows = rows.filter((r) =>
-      recordSearchValues(r).some((x) =>
-        String(x || "")
-          .toLowerCase()
-          .includes(q),
-      ),
-    );
+  const serverMode = recordListServerMode();
+  const filtersSig = JSON.stringify(f);
+  if (app.recordFiltersSig !== filtersSig) {
+    app.recordFiltersSig = filtersSig;
+    app.recordPage = 1;
   }
-  if (f.status !== "all") rows = rows.filter((r) => r.status === f.status);
-  if (f.campaign !== "all")
-    rows = rows.filter((r) => r.campaign === f.campaign);
-  if (f.compliance !== "all")
-    rows = rows.filter((r) => r.internal1?.conformity === f.compliance);
-  const inRange = (value, from, to) => {
-    if (!from && !to) return true;
-    const day = String(value || "").slice(0, 10);
-    if (!day) return false;
-    return (!from || day >= from) && (!to || day <= to);
-  };
-  rows = rows.filter(
-    (r) =>
-      inRange(r.callDate, f.callFrom, f.callTo) &&
-      inRange(r.closedAt, f.closedFrom, f.closedTo),
-  );
-  rows.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  let pageRows;
+  let totalRows;
+  let recordPages;
+  if (serverMode) {
+    // Filtres, tri et découpage en pages de 10 faits par le serveur.
+    const querySig = `${filtersSig}|${app.recordPage}`;
+    if (app.recordQuerySig !== querySig) {
+      app.recordQuerySig = querySig;
+      scheduleRecordPageFetch(f.search ? 250 : 0);
+    }
+    pageRows = app.recordList.rows;
+    totalRows = app.recordList.total;
+    recordPages = app.recordList.pages;
+  } else {
+    let rows = state.records.filter((r) =>
+      showArchived ? r.archived : !r.archived,
+    );
+    if (f.search) {
+      const q = f.search.toLowerCase();
+      rows = rows.filter((r) =>
+        recordSearchValues(r).some((x) =>
+          String(x || "")
+            .toLowerCase()
+            .includes(q),
+        ),
+      );
+    }
+    if (f.status !== "all") rows = rows.filter((r) => r.status === f.status);
+    if (f.campaign !== "all")
+      rows = rows.filter((r) => r.campaign === f.campaign);
+    if (f.compliance !== "all")
+      rows = rows.filter((r) => r.internal1?.conformity === f.compliance);
+    const inRange = (value, from, to) => {
+      if (!from && !to) return true;
+      const day = String(value || "").slice(0, 10);
+      if (!day) return false;
+      return (!from || day >= from) && (!to || day <= to);
+    };
+    rows = rows.filter(
+      (r) =>
+        inRange(r.callDate, f.callFrom, f.callTo) &&
+        inRange(r.closedAt, f.closedFrom, f.closedTo),
+    );
+    rows.sort(
+      (a, b) =>
+        String(b.callDate || "").localeCompare(String(a.callDate || "")) ||
+        String(b.callTime || "").localeCompare(String(a.callTime || "")) ||
+        String(b.createdAt || "").localeCompare(String(a.createdAt || "")),
+    );
+    totalRows = rows.length;
+    recordPages = Math.max(1, Math.ceil(totalRows / RECORD_PAGE_SIZE));
+    app.recordPage = Math.min(Math.max(1, app.recordPage), recordPages);
+    const pageStart = (app.recordPage - 1) * RECORD_PAGE_SIZE;
+    pageRows = rows.slice(pageStart, pageStart + RECORD_PAGE_SIZE);
+  }
+  const recordPageButtons = Array.from({ length: recordPages }, (_, i) => i + 1)
+    .filter((n) => n === 1 || n === recordPages || Math.abs(n - app.recordPage) <= 1)
+    .map(
+      (n, i, list) =>
+        `${i && n - list[i - 1] > 1 ? "<span>…</span>" : ""}<button class="page-num${n === app.recordPage ? " active" : ""}" data-record-page="${n}">${n}</button>`,
+    )
+    .join("");
   const statuses = [
     ...new Set(state.records.filter((r) => !r.archived).map((r) => r.status)),
   ];
@@ -2611,9 +2710,9 @@ function renderRecords() {
     ...new Set(state.records.filter((r) => !r.archived).map((r) => r.campaign)),
   ];
   return `${pageHeading("Fiches d’appel", `Retrouvez, filtrez et ouvrez les ${state.records.filter((r) => !r.archived).length} fiches de démonstration. Chaque appel conserve son audio, ses évaluations et son historique.`, `<button class="btn btn-secondary" data-action="export">${ic("download")} Exporter</button><button class="btn btn-primary" data-action="new-record">${ic("plus")} Nouvel enregistrement</button>`)}
-    <section class="panel table-panel"><div class="panel-header"><div><h2 class="panel-title">Toutes les fiches</h2><p class="panel-subtitle">Recherche par indice, agent, campagne, base, nom audio ou File ID</p></div><span class="badge badge-gray">${rows.length} résultat${rows.length === 1 ? "" : "s"}</span></div>
-    <div class="filters-row"><button class="icon-button" type="button" data-action="clear-record-filters" title="Effacer tous les filtres" aria-label="Effacer tous les filtres">${ic("filter-x")}</button><label class="filter-search">${ic("search")}<input type="search" id="recordSearch" data-filter="search" value="${esc(f.search)}" placeholder="Indice, agent, base, campagne, nom audio…"></label><select class="filter-select" data-filter="status"><option value="all">Tous les statuts</option>${statuses.map((s) => `<option value="${esc(s)}" ${f.status === s ? "selected" : ""}>${esc(statusText(s))}</option>`).join("")}</select><select class="filter-select" data-filter="campaign"><option value="all">Toutes les campagnes</option>${campaigns.map((c) => `<option value="${esc(c)}" ${f.campaign === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select><select class="filter-select" data-filter="compliance"><option value="all">Toute conformité</option><option value="CONFORME" ${f.compliance === "CONFORME" ? "selected" : ""}>Conforme</option><option value="NON_CONFORME" ${f.compliance === "NON_CONFORME" ? "selected" : ""}>Non conforme</option></select>${canManageRecords() ? `<select class="filter-select" data-filter="archived"><option value="active" ${f.archived !== "archived" ? "selected" : ""}>Fiches actives</option><option value="archived" ${f.archived === "archived" ? "selected" : ""}>Fiches supprimées</option></select>` : ""}<label class="filter-date" style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Date d’appel <input class="filter-select" type="date" data-filter="callFrom" value="${esc(f.callFrom)}" aria-label="Date d’appel – début"/> → <input class="filter-select" type="date" data-filter="callTo" value="${esc(f.callTo)}" aria-label="Date d’appel – fin"/></label><label class="filter-date" style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Date de clôture <input class="filter-select" type="date" data-filter="closedFrom" value="${esc(f.closedFrom)}" aria-label="Date de clôture – début"/> → <input class="filter-select" type="date" data-filter="closedTo" value="${esc(f.closedTo)}" aria-label="Date de clôture – fin"/></label><span class="filter-count">${rows.length} fiche${rows.length === 1 ? "" : "s"}</span></div>
-    <div class="table-wrap">${renderRecordsTable(rows)}</div><div class="table-footer"><span>Données de démonstration · ${rows.length} fiche${rows.length === 1 ? "" : "s"} visibles</span><div class="pagination"><button disabled>${ic("chevron-left")}</button><button class="page-num">1</button><button disabled>${ic("chevron-right")}</button></div></div></section>`;
+    <section class="panel table-panel"><div class="panel-header"><div><h2 class="panel-title">Toutes les fiches</h2><p class="panel-subtitle">Recherche par indice, agent, campagne, base, nom audio ou File ID</p></div><span class="badge badge-gray">${totalRows} résultat${totalRows === 1 ? "" : "s"}</span></div>
+    <div class="filters-row"><button class="icon-button" type="button" data-action="clear-record-filters" title="Effacer tous les filtres" aria-label="Effacer tous les filtres">${ic("filter-x")}</button><label class="filter-search">${ic("search")}<input type="search" id="recordSearch" data-filter="search" value="${esc(f.search)}" placeholder="Indice, agent, base, campagne, nom audio…"></label><select class="filter-select" data-filter="status"><option value="all">Tous les statuts</option>${statuses.map((s) => `<option value="${esc(s)}" ${f.status === s ? "selected" : ""}>${esc(statusText(s))}</option>`).join("")}</select><select class="filter-select" data-filter="campaign"><option value="all">Toutes les campagnes</option>${campaigns.map((c) => `<option value="${esc(c)}" ${f.campaign === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select><select class="filter-select" data-filter="compliance"><option value="all">Toute conformité</option><option value="CONFORME" ${f.compliance === "CONFORME" ? "selected" : ""}>Conforme</option><option value="NON_CONFORME" ${f.compliance === "NON_CONFORME" ? "selected" : ""}>Non conforme</option></select>${canManageRecords() ? `<select class="filter-select" data-filter="archived"><option value="active" ${f.archived !== "archived" ? "selected" : ""}>Fiches actives</option><option value="archived" ${f.archived === "archived" ? "selected" : ""}>Fiches supprimées</option></select>` : ""}<label class="filter-date" style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Date d’appel <input class="filter-select" type="date" data-filter="callFrom" value="${esc(f.callFrom)}" aria-label="Date d’appel – début"/> → <input class="filter-select" type="date" data-filter="callTo" value="${esc(f.callTo)}" aria-label="Date d’appel – fin"/></label><label class="filter-date" style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Date de clôture <input class="filter-select" type="date" data-filter="closedFrom" value="${esc(f.closedFrom)}" aria-label="Date de clôture – début"/> → <input class="filter-select" type="date" data-filter="closedTo" value="${esc(f.closedTo)}" aria-label="Date de clôture – fin"/></label><span class="filter-count">${totalRows} fiche${totalRows === 1 ? "" : "s"}</span></div>
+    <div class="table-wrap">${renderRecordsTable(pageRows)}</div><div class="table-footer"><span>${totalRows} fiche${totalRows === 1 ? "" : "s"} · page ${app.recordPage} / ${recordPages}</span><div class="pagination"><button data-record-page="${app.recordPage - 1}" ${app.recordPage <= 1 ? "disabled" : ""}>${ic("chevron-left")}</button>${recordPageButtons}<button data-record-page="${app.recordPage + 1}" ${app.recordPage >= recordPages ? "disabled" : ""}>${ic("chevron-right")}</button></div></div></section>`;
 }
 function renderSend() {
   const records = clientSendAllowedRecords().sort((a, b) =>
@@ -4937,7 +5036,12 @@ function goPage(page) {
   closeSidebar();
   render();
   window.scrollTo({ top: 0, behavior: "smooth" });
-  if (page === "records") refreshRecordsFromServer();
+  if (page === "records") {
+    if (recordListServerMode()) {
+      app.recordQuerySig = "";
+      render();
+    } else refreshRecordsFromServer();
+  }
   if (page === "settings") refreshGridsFromServer();
   if (page === "tasks") refreshTasksFromServer();
   if (page === "debriefs") {
@@ -9708,6 +9812,14 @@ document.addEventListener("click", (event) => {
   }
   if (!searchResults.contains(event.target) && event.target !== searchInput)
     searchResults.classList.remove("open");
+  const recordPager = event.target.closest("[data-record-page]");
+  if (recordPager) {
+    if (!recordPager.disabled) {
+      app.recordPage = Number(recordPager.dataset.recordPage) || 1;
+      render();
+    }
+    return;
+  }
   const debriefPager = event.target.closest("[data-debrief-page]");
   if (debriefPager && !debriefPager.disabled) {
     app.debriefPage = Number(debriefPager.dataset.debriefPage) || 1;

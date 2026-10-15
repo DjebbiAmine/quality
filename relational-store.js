@@ -121,8 +121,10 @@ const saveTask=(db,task)=>writeTask(db,task,null);
 const saveEvent=(db,event)=>writeEvent(db,event,null);
 
 // Chargement ciblé de fiches (avec tous leurs enfants), même composition que le chargement complet.
-async function loadRecordsWhere(db,whereSql,params=[],lock=false){
-  const rows=(await db.query(`select ${selectList(RECORD_COLS)},legacy_final_return,extra from public.crm_records${whereSql?` where ${whereSql}`:''} order by created_at desc nulls last,id desc${lock?' for update':''}`,params)).rows;
+const RECORD_ORDER='created_at desc nulls last,id desc';
+const RECORD_LIST_ORDER='call_date desc nulls last,call_time desc nulls last,created_at desc nulls last,id desc';
+async function loadRecordsWhere(db,whereSql,params=[],lock=false,order=RECORD_ORDER){
+  const rows=(await db.query(`select ${selectList(RECORD_COLS)},legacy_final_return,extra from public.crm_records${whereSql?` where ${whereSql}`:''} order by ${order}${lock?' for update':''}`,params)).rows;
   if(!rows.length)return [];
   const ids=rows.map(row=>row.id);
   const child=(table,cols,extraCols,order)=>db.query(`select ${selectList(cols)}${extraCols?`,${extraCols}`:''},extra from public.${table} where record_id=any($1::text[]) order by ${order}`,[ids]).then(r=>r.rows);
@@ -142,6 +144,58 @@ async function loadRecords(db,{archived,ids}={}){
   if(archived===true)where.push('archived');else if(archived===false)where.push('not archived');
   if(ids){params.push(ids);where.push(`id=any($${params.length}::text[])`)}
   return loadRecordsWhere(db,where.join(' and '),params);
+}
+// Liste paginée en SQL : filtres, droits, recherche, tri et LIMIT/OFFSET sont évalués par PostgreSQL ;
+// seules les fiches de la page sont ensuite composées (une requête par table enfant, limitée à ces identifiants).
+// Index d'appui : migrations/001_crm_records_list_pagination.sql.
+const likePattern=text=>`%${String(text).replace(/[\\%_]/g,'\\$&')}%`;
+const SQL_NORM_TEXT=column=>`btrim(regexp_replace(translate(lower(coalesce(${column},'')),'àâäáãåçéèêëíìîïñóòôöõúùûüýÿœæ','aaaaaaceeeeiiiinooooouuuuyyoa'),'[^a-z0-9]+',' ','g'))`;
+function buildRecordListWhere({archived,filters={},search='',compliance='',scope={}}){
+  const params=[];const where=[archived?'r.archived = true':'r.archived = false'];
+  const add=(sql,value)=>{params.push(value);where.push(sql.replace(/\?/g,`$${params.length}`))};
+  if(scope.restrictedUserId!==undefined){
+    // Sans records_view_all : fiches dont le responsable est l'utilisateur (identifiant, ou nom pour les données historiques sans identifiant).
+    params.push(scope.restrictedUserId);const idRef=`$${params.length}`;
+    params.push(scope.restrictedName||'');const nameRef=`$${params.length}`;
+    where.push(`((nullif(btrim(r.responsible_id),'') is not null and r.responsible_id = ${idRef}) or (nullif(btrim(r.responsible_id),'') is null and ${nameRef} <> '' and ${SQL_NORM_TEXT('r.responsible')} = ${nameRef}))`);
+  }
+  if(filters.status)add('r.status = ?',filters.status);
+  if(filters.campaign)add('r.campaign = ?',filters.campaign);
+  if(filters.callFrom)add('r.call_date >= ?::date',filters.callFrom);
+  if(filters.callTo)add('r.call_date <= ?::date',filters.callTo);
+  if(filters.closedFrom)add('r.closed_at >= ?::date',filters.closedFrom);
+  // Borne haute exclusive au lendemain : reste utilisable par l'index et inclut toute la journée.
+  if(filters.closedTo)add("r.closed_at < (?::date + 1)",filters.closedTo);
+  if(compliance){
+    if(scope.canInternal1===false)where.push('false');
+    else add("exists (select 1 from public.crm_record_evaluations e where e.record_id = r.id and e.stage = 'internal1' and e.is_current and e.conformity = ?)",compliance);
+  }
+  if(search){
+    params.push(likePattern(search));const q=`$${params.length}`;
+    const text=['r.id','r.agent','r.employee_code','r.agent_code_from_filename','r.client','r.campaign','r.responsible','r.client_ref','r.source_filename','r.record_index','r.base_name','r.campaign_code','r.raw_segment1',"r.audio->>'drive_file_name'","r.audio->>'drive_file_id'"];
+    if(scope.canClientReturns!==false)text.push('r.client_call1_status');
+    if(scope.canClientSend!==false)text.push('r.batch_id');
+    if(scope.canClientReturns!==false&&scope.portal!==true)text.push('r.raw_segment6','r.raw_segment7');
+    const parts=text.map(column=>`${column} ilike ${q}`);
+    if(scope.canInternal2!==false)parts.push(`exists (select 1 from public.crm_record_evaluations e where e.record_id = r.id and e.stage = 'internal2' and e.is_current and (e.extra->>'analysisPoleQualite' ilike ${q} or e.extra->>'promiseStatus' ilike ${q} or e.extra->>'donConformity' ilike ${q}))`);
+    if(scope.canFinalReturn!==false)parts.push(`(select f.status from public.crm_record_final_returns f where f.record_id = r.id order by coalesce(f.version,0) desc, f.returned_date desc nulls last limit 1) ilike ${q}`);
+    if(scope.canClientReturns!==false)parts.push(`exists (select 1 from public.crm_record_client_returns c where c.record_id = r.id and (c.call1_status ilike ${q} or c.final_status ilike ${q} or c.client_remarks ilike ${q} or c.base_snapshot ilike ${q} or c.record_index_snapshot ilike ${q}))`);
+    where.push(`(${parts.join(' or ')})`);
+  }
+  return {whereSql:where.join(' and '),params};
+}
+async function loadRecordsPage(db,{archived=false,filters,search,compliance,scope,page=1,pageSize=10}){
+  const {whereSql,params}=buildRecordListWhere({archived,filters,search,compliance,scope});
+  const fetchIds=async current=>(await db.query(`select r.id from public.crm_records r where ${whereSql} order by ${RECORD_LIST_ORDER.replace(/\b(call_date|call_time|created_at|id)\b/g,'r.$1')} limit $${params.length+1} offset $${params.length+2}`,[...params,pageSize,(current-1)*pageSize])).rows.map(row=>row.id);
+  const countPromise=db.query(`select count(*)::int as n from public.crm_records r where ${whereSql}`,params);
+  let current=Math.max(1,page);
+  let ids=await fetchIds(current);
+  const total=(await countPromise).rows[0].n;
+  const pages=Math.max(1,Math.ceil(total/pageSize));
+  if(current>pages){current=pages;ids=await fetchIds(current)}
+  const records=ids.length?await loadRecordsWhere(db,'id=any($1::text[])',[ids]):[];
+  records.sort((a,b)=>ids.indexOf(a.id)-ids.indexOf(b.id));
+  return {records,pagination:{page:current,pageSize,total,pages}};
 }
 async function lockRecord(db,id){return (await loadRecordsWhere(db,'id=$1',[id],true))[0]||null}
 const saveRecord=(db,record)=>writeRecord(db,record);
@@ -533,4 +587,4 @@ function canonicalizeRelational(state){
 }
 
 const RELATIONAL_KEYS=['records','events','batches','tasks','debriefs','criteriaByStage','optionGroups'];
-module.exports={loadGrids,saveOptionGroup,saveCriterion,deleteCriterionRow,deleteOptionGroupRow,loadRecords,lockRecord,saveRecord,nextRecordId,loadDebriefs,lockDebrief,saveDebrief,nextDebriefId,loadTasks,lockTask,saveTask,saveEvent,canonicalizeRelational,loadRelational,insertRelational,persistRelational,diffStates,counts,looseEqual,loose,RELATIONAL_KEYS,STAGES};
+module.exports={loadGrids,saveOptionGroup,saveCriterion,deleteCriterionRow,deleteOptionGroupRow,loadRecords,loadRecordsPage,lockRecord,saveRecord,nextRecordId,loadDebriefs,lockDebrief,saveDebrief,nextDebriefId,loadTasks,lockTask,saveTask,saveEvent,canonicalizeRelational,loadRelational,insertRelational,persistRelational,diffStates,counts,looseEqual,loose,RELATIONAL_KEYS,STAGES};
