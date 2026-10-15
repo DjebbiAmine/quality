@@ -1072,6 +1072,10 @@ const app = {
     campaign: "all",
     compliance: "all",
     archived: "active",
+    callFrom: "",
+    callTo: "",
+    closedFrom: "",
+    closedTo: "",
   },
   debriefView: "active",
   debriefFilters: { agent: "", dossier: "", note: "", score: "" },
@@ -2513,7 +2517,7 @@ function renderRecordsTable(rows, opts = {}) {
   const selectionMode = sendMode;
   if (!rows.length)
     return `<div class="empty-state"><div class="empty-icon">${ic("clipboard")}</div><strong>Aucune fiche à afficher</strong><p>Ajustez les filtres ou créez un nouvel enregistrement audio.</p><button class="btn btn-primary btn-small" data-action="new-record">${ic("plus")} Nouvel enregistrement</button></div>`;
-  return `<table class="data-table"><thead><tr>${selectionMode ? '<th style="width:35px"></th>' : ""}<th>Fiche</th><th>Date</th><th>Dossier</th><th>Agent</th><th>Indice</th><th>Retour client</th><th>Réévaluation</th><th>Retour final</th><th>Libellés</th><th>Statut</th></tr></thead><tbody>${rows
+  return `<table class="data-table"><thead><tr>${selectionMode ? '<th style="width:35px"></th>' : ""}<th>Fiche</th><th>Date d’appel</th><th>Date de clôture</th><th>Dossier</th><th>Agent</th><th>Indice</th><th>Retour client</th><th>Réévaluation</th><th>Retour final</th><th>Libellés</th><th>Statut</th></tr></thead><tbody>${rows
     .map((r) => {
       const returns = getClientReturns(r);
       const latest = latestClientReturn(r);
@@ -2563,7 +2567,7 @@ function renderRecordsTable(rows, opts = {}) {
       const checkbox = sendMode
         ? `<td><input class="batch-select" type="checkbox" data-send-select="${esc(r.id)}" ${selected ? "checked" : ""} aria-label="Sélectionner l’indice ${esc(recordIndexValue(r))}"></td>`
         : "";
-      return `<tr data-open-record="${esc(r.id)}">${checkbox}<td class="record-open-cell"><button class="icon-button record-action-button" type="button" data-action="open-record" data-record-id="${esc(r.id)}" onclick="return window.openQualiContactRecord(event,this.dataset.recordId)" title="Modifier la fiche" aria-label="Modifier la fiche ${esc(recordIndexValue(r))}">${ic("edit")}</button>${!selectionMode && !r.archived && canManageRecords() ? `<button class="icon-button record-action-button record-action-delete" type="button" data-action="archive-record" data-record-id="${esc(r.id)}" title="Supprimer la fiche" aria-label="Supprimer la fiche ${esc(recordIndexValue(r))}">${ic("trash")}</button>` : ""}</td><td>${formatDate(r.callDate)}</td><td><span class="record-source-index"><strong>${esc(r.baseName || "—")}</strong><small>${esc(r.campaign || "")}</small></span></td><td><span class="agent-cell">${avatar(r.agent)}<span class="agent-cell-copy"><strong>${esc(r.agent)}</strong><small>${r.employeeCode ? esc(r.employeeCode) : r.agentCodeFromFilename ? `Candidat ${esc(r.agentCodeFromFilename)}` : "À rattacher"}</small></span></span></td><td class="record-id">${esc(recordIndexValue(r))}</td><td>${returnCell}</td><td>${reevaluation}</td><td>${finalCell}</td><td>${labelsHtml}</td><td>${recordBadge(r)}</td></tr>`;
+      return `<tr data-open-record="${esc(r.id)}">${checkbox}<td class="record-open-cell"><button class="icon-button record-action-button" type="button" data-action="open-record" data-record-id="${esc(r.id)}" onclick="return window.openQualiContactRecord(event,this.dataset.recordId)" title="Modifier la fiche" aria-label="Modifier la fiche ${esc(recordIndexValue(r))}">${ic("edit")}</button>${!selectionMode && !r.archived && canManageRecords() ? `<button class="icon-button record-action-button record-action-delete" type="button" data-action="archive-record" data-record-id="${esc(r.id)}" title="Supprimer la fiche" aria-label="Supprimer la fiche ${esc(recordIndexValue(r))}">${ic("trash")}</button>` : ""}</td><td>${formatDate(r.callDate)}</td><td>${r.closedAt ? formatDate(r.closedAt) : "—"}</td><td><span class="record-source-index"><strong>${esc(r.baseName || "—")}</strong><small>${esc(r.campaign || "")}</small></span></td><td><span class="agent-cell">${avatar(r.agent)}<span class="agent-cell-copy"><strong>${esc(r.agent)}</strong><small>${r.employeeCode ? esc(r.employeeCode) : r.agentCodeFromFilename ? `Candidat ${esc(r.agentCodeFromFilename)}` : "À rattacher"}</small></span></span></td><td class="record-id">${esc(recordIndexValue(r))}</td><td>${returnCell}</td><td>${reevaluation}</td><td>${finalCell}</td><td>${labelsHtml}</td><td>${recordBadge(r)}</td></tr>`;
     })
     .join("")}</tbody></table>`;
 }
@@ -2588,6 +2592,17 @@ function renderRecords() {
     rows = rows.filter((r) => r.campaign === f.campaign);
   if (f.compliance !== "all")
     rows = rows.filter((r) => r.internal1?.conformity === f.compliance);
+  const inRange = (value, from, to) => {
+    if (!from && !to) return true;
+    const day = String(value || "").slice(0, 10);
+    if (!day) return false;
+    return (!from || day >= from) && (!to || day <= to);
+  };
+  rows = rows.filter(
+    (r) =>
+      inRange(r.callDate, f.callFrom, f.callTo) &&
+      inRange(r.closedAt, f.closedFrom, f.closedTo),
+  );
   rows.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   const statuses = [
     ...new Set(state.records.filter((r) => !r.archived).map((r) => r.status)),
@@ -2597,7 +2612,7 @@ function renderRecords() {
   ];
   return `${pageHeading("Fiches d’appel", `Retrouvez, filtrez et ouvrez les ${state.records.filter((r) => !r.archived).length} fiches de démonstration. Chaque appel conserve son audio, ses évaluations et son historique.`, `<button class="btn btn-secondary" data-action="export">${ic("download")} Exporter</button><button class="btn btn-primary" data-action="new-record">${ic("plus")} Nouvel enregistrement</button>`)}
     <section class="panel table-panel"><div class="panel-header"><div><h2 class="panel-title">Toutes les fiches</h2><p class="panel-subtitle">Recherche par indice, agent, campagne, base, nom audio ou File ID</p></div><span class="badge badge-gray">${rows.length} résultat${rows.length === 1 ? "" : "s"}</span></div>
-    <div class="filters-row"><label class="filter-search">${ic("search")}<input type="search" id="recordSearch" data-filter="search" value="${esc(f.search)}" placeholder="Indice, agent, base, campagne, nom audio…"></label><select class="filter-select" data-filter="status"><option value="all">Tous les statuts</option>${statuses.map((s) => `<option value="${esc(s)}" ${f.status === s ? "selected" : ""}>${esc(statusText(s))}</option>`).join("")}</select><select class="filter-select" data-filter="campaign"><option value="all">Toutes les campagnes</option>${campaigns.map((c) => `<option value="${esc(c)}" ${f.campaign === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select><select class="filter-select" data-filter="compliance"><option value="all">Toute conformité</option><option value="CONFORME" ${f.compliance === "CONFORME" ? "selected" : ""}>Conforme</option><option value="NON_CONFORME" ${f.compliance === "NON_CONFORME" ? "selected" : ""}>Non conforme</option></select>${canManageRecords() ? `<select class="filter-select" data-filter="archived"><option value="active" ${f.archived !== "archived" ? "selected" : ""}>Fiches actives</option><option value="archived" ${f.archived === "archived" ? "selected" : ""}>Fiches supprimées</option></select>` : ""}<span class="filter-count">${rows.length} fiche${rows.length === 1 ? "" : "s"}</span></div>
+    <div class="filters-row"><button class="icon-button" type="button" data-action="clear-record-filters" title="Effacer tous les filtres" aria-label="Effacer tous les filtres">${ic("filter-x")}</button><label class="filter-search">${ic("search")}<input type="search" id="recordSearch" data-filter="search" value="${esc(f.search)}" placeholder="Indice, agent, base, campagne, nom audio…"></label><select class="filter-select" data-filter="status"><option value="all">Tous les statuts</option>${statuses.map((s) => `<option value="${esc(s)}" ${f.status === s ? "selected" : ""}>${esc(statusText(s))}</option>`).join("")}</select><select class="filter-select" data-filter="campaign"><option value="all">Toutes les campagnes</option>${campaigns.map((c) => `<option value="${esc(c)}" ${f.campaign === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select><select class="filter-select" data-filter="compliance"><option value="all">Toute conformité</option><option value="CONFORME" ${f.compliance === "CONFORME" ? "selected" : ""}>Conforme</option><option value="NON_CONFORME" ${f.compliance === "NON_CONFORME" ? "selected" : ""}>Non conforme</option></select>${canManageRecords() ? `<select class="filter-select" data-filter="archived"><option value="active" ${f.archived !== "archived" ? "selected" : ""}>Fiches actives</option><option value="archived" ${f.archived === "archived" ? "selected" : ""}>Fiches supprimées</option></select>` : ""}<label class="filter-date" style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Date d’appel <input class="filter-select" type="date" data-filter="callFrom" value="${esc(f.callFrom)}" aria-label="Date d’appel – début"/> → <input class="filter-select" type="date" data-filter="callTo" value="${esc(f.callTo)}" aria-label="Date d’appel – fin"/></label><label class="filter-date" style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Date de clôture <input class="filter-select" type="date" data-filter="closedFrom" value="${esc(f.closedFrom)}" aria-label="Date de clôture – début"/> → <input class="filter-select" type="date" data-filter="closedTo" value="${esc(f.closedTo)}" aria-label="Date de clôture – fin"/></label><span class="filter-count">${rows.length} fiche${rows.length === 1 ? "" : "s"}</span></div>
     <div class="table-wrap">${renderRecordsTable(rows)}</div><div class="table-footer"><span>Données de démonstration · ${rows.length} fiche${rows.length === 1 ? "" : "s"} visibles</span><div class="pagination"><button disabled>${ic("chevron-left")}</button><button class="page-num">1</button><button disabled>${ic("chevron-right")}</button></div></div></section>`;
 }
 function renderSend() {
@@ -8721,7 +8736,8 @@ function exportCsv(rows, filename) {
     return;
   }
   const columns = [
-    ["Date", "callDate"],
+    ["Date d’appel", "callDate"],
+    ["Date de clôture", "closedAt"],
     ["Dossier (Nom de base)", "baseName"],
     ["Agent", "agent"],
     ["Indice", "recordIndex"],
@@ -8943,6 +8959,7 @@ function createClientReturnWorkbook(rows) {
         .join(", ");
       return [
         r.callDate || "",
+        r.closedAt ? String(r.closedAt).slice(0, 10) : "",
         r.baseName || "",
         r.agent || "",
         recordIndexValue(r, ""),
@@ -9580,6 +9597,19 @@ function handleAction(actionEl) {
     case "open-comparison":
       openFinalReturn(actionEl.dataset.recordId || app.recordId);
       break;
+    case "clear-record-filters":
+      Object.assign(app.filterRecords, {
+        search: "",
+        status: "all",
+        campaign: "all",
+        compliance: "all",
+        callFrom: "",
+        callTo: "",
+        closedFrom: "",
+        closedTo: "",
+      });
+      render();
+      break;
     case "export":
       if (backend.enabled && backend.authenticated)
         apiRequest("/quality/api/dashboard/export")
@@ -9875,6 +9905,12 @@ document.addEventListener("change", (event) => {
   }
   if (event.target.matches('[data-filter="compliance"]')) {
     app.filterRecords.compliance = event.target.value;
+    render();
+    return;
+  }
+  const dateKey = event.target.dataset?.filter;
+  if (["callFrom", "callTo", "closedFrom", "closedTo"].includes(dateKey)) {
+    app.filterRecords[dateKey] = event.target.value;
     render();
     return;
   }
