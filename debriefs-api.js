@@ -212,6 +212,16 @@ function registerDebriefRoutes(app, { pool, requireAuth, requireReadyPassword, r
     res.set('Cache-Control', 'private, no-store'); res.json({ debriefs });
   });
 
+  // Valeurs du filtre « Action » : titres distincts de crm_debrief_actions, pour les débriefs de la vue demandée.
+  app.get('/quality/api/debriefs/action-titles', ...guard, async (req, res) => {
+    const view = String(req.query.view || 'active');
+    if (!['active', 'archived'].includes(view)) throw fail(400, 'DEBRIEF_INVALID', 'Vue inconnue.');
+    const result = await pool.query(
+      `select distinct a.title from public.crm_debrief_actions a join public.crm_debriefs d on d.id = a.debrief_id
+        where d.archived = $1 and nullif(btrim(a.title), '') is not null order by a.title`, [view === 'archived']);
+    res.set('Cache-Control', 'private, no-store'); res.json({ titles: result.rows.map((row) => row.title) });
+  });
+
   app.post('/quality/api/debriefs', ...guard, async (req, res) => {
     const values = parseDebriefCreate(req.body);
     const out = await inTransaction(async db => {

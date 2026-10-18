@@ -1094,7 +1094,8 @@ const app = {
   sendQuerySig: "",
   sendList: { rows: [], total: 0, pages: 1, loaded: false, error: "" },
   debriefView: "active",
-  debriefFilters: { agent: "", dossier: "", note: "", score: "" },
+  debriefActionTitles: { active: [], archived: [] },
+  debriefFilters: { agent: "", dossier: "", action: "", note: "", score: "" },
   debriefPage: 1,
   debriefPageSize: 10,
   openDebriefId: null,
@@ -3057,6 +3058,8 @@ function debriefTableRow(d) {
       .map((record) => recordIndexValue(record, ""))
       .filter(Boolean)
       .join(", "),
+    // Titres des actions (crm_debrief_actions) rattachées à ce débrief.
+    actions: (d.actions || []).map((a) => a.title).filter(Boolean),
     note: debriefRatingStats(d).average,
     score: scored.length
       ? Math.round(scored.reduce((sum, value) => sum + value, 0) / scored.length)
@@ -3079,6 +3082,7 @@ function renderDebriefTable() {
       (row) =>
         norm(row.agent).includes(norm(filters.agent)) &&
         norm(row.dossier).includes(norm(filters.dossier)) &&
+        (!filters.action || row.actions.includes(filters.action)) &&
         norm(row.note == null ? "" : row.note.toFixed(1)).includes(
           norm(filters.note),
         ) &&
@@ -3093,10 +3097,10 @@ function renderDebriefTable() {
     ? visible
         .map(
           (row) =>
-            `<tr class="debrief-row" tabindex="0" data-debrief-open="${esc(row.d.id)}" style="cursor:pointer" title="Ouvrir le débrief ${esc(row.d.id)}"><td><span class="agent-cell">${avatar(row.agent)}<span class="agent-cell-copy"><strong>${esc(row.agent)}</strong><small>${esc(row.d.id)}</small></span></span></td><td>${esc(row.dossier || "—")}</td><td>${row.note == null ? "—" : `${row.note.toFixed(1)} / 5`}</td><td>${row.score == null ? "—" : `${row.score} %`}</td></tr>`,
+            `<tr class="debrief-row" tabindex="0" data-debrief-open="${esc(row.d.id)}" style="cursor:pointer" title="Ouvrir le débrief ${esc(row.d.id)}"><td><span class="agent-cell">${avatar(row.agent)}<span class="agent-cell-copy"><strong>${esc(row.agent)}</strong><small>${esc(row.d.id)}</small></span></span></td><td>${esc(row.dossier || "—")}</td><td>${row.actions.length ? row.actions.map((title) => `<div>${esc(title)}</div>`).join("") : "—"}</td><td>${row.note == null ? "—" : `${row.note.toFixed(1)} / 5`}</td><td>${row.score == null ? "—" : `${row.score} %`}</td></tr>`,
         )
         .join("")
-    : '<tr><td colspan="4" class="muted" style="text-align:center;padding:22px">Aucun débrief ne correspond aux filtres.</td></tr>';
+    : '<tr><td colspan="5" class="muted" style="text-align:center;padding:22px">Aucun débrief ne correspond aux filtres.</td></tr>';
   const pageButtons = Array.from({ length: pages }, (_, i) => i + 1)
     .filter((n) => n === 1 || n === pages || Math.abs(n - app.debriefPage) <= 1)
     .map(
@@ -3104,7 +3108,7 @@ function renderDebriefTable() {
         `${i && n - list[i - 1] > 1 ? "<span>…</span>" : ""}<button class="page-num${n === app.debriefPage ? " active" : ""}" data-debrief-page="${n}">${n}</button>`,
     )
     .join("");
-  return `<div class="table-wrap"><table class="data-table"><thead><tr><th>Agent</th><th>N° dossier</th><th>Note</th><th>Score</th></tr></thead><tbody>${body}</tbody></table></div><div class="table-footer"><span>${rows.length} débrief(s) · page ${app.debriefPage} / ${pages}</span><div class="pagination"><select class="filter-select" data-debrief-page-size>${[10, 25, 50].map((n) => `<option value="${n}" ${n === pageSize ? "selected" : ""}>${n} / page</option>`).join("")}</select><button data-debrief-page="${app.debriefPage - 1}" ${app.debriefPage <= 1 ? "disabled" : ""}>${ic("chevron-left")}</button>${pageButtons}<button data-debrief-page="${app.debriefPage + 1}" ${app.debriefPage >= pages ? "disabled" : ""}>${ic("chevron-right")}</button></div></div>`;
+  return `<div class="table-wrap"><table class="data-table"><thead><tr><th>Agent</th><th>N° dossier</th><th>Action</th><th>Note</th><th>Score</th></tr></thead><tbody>${body}</tbody></table></div><div class="table-footer"><span>${rows.length} débrief(s) · page ${app.debriefPage} / ${pages}</span><div class="pagination"><select class="filter-select" data-debrief-page-size>${[10, 25, 50].map((n) => `<option value="${n}" ${n === pageSize ? "selected" : ""}>${n} / page</option>`).join("")}</select><button data-debrief-page="${app.debriefPage - 1}" ${app.debriefPage <= 1 ? "disabled" : ""}>${ic("chevron-left")}</button>${pageButtons}<button data-debrief-page="${app.debriefPage + 1}" ${app.debriefPage >= pages ? "disabled" : ""}>${ic("chevron-right")}</button></div></div>`;
 }
 function renderDebriefs() {
   const showArchivedDebriefs =
@@ -3116,11 +3120,15 @@ function renderDebriefs() {
     return `${pageHeading(`<button class="back-link" data-action="debrief-back">${ic("chevron-left")} Débriefs</button><br>Débrief ${esc(open.id)}`, `${esc(open.agent)} · ${formatDate(open.date)}`, "")}<div class="stack">${renderDebriefCard(open)}</div>`;
   const metrics = debriefDashboardStats();
   const filters = app.debriefFilters;
+  // Titres distincts fournis par une requête SQL dédiée (GET /quality/api/debriefs/action-titles).
+  const actionTitles =
+    app.debriefActionTitles[showArchivedDebriefs ? "archived" : "active"];
+  const actionFilterSelect = `<select class="filter-select" data-debrief-filter="action" aria-label="Filtrer par action"><option value="">Toutes les actions</option>${actionTitles.map((title) => `<option value="${esc(title)}" ${filters.action === title ? "selected" : ""}>${esc(title)}</option>`).join("")}</select>`;
   const filterInput = (key, label) =>
     `<input class="filter-select" type="search" data-debrief-filter="${key}" placeholder="${label}" aria-label="Filtrer par ${label}" value="${esc(filters[key])}"/>`;
   return `${pageHeading("Débriefs agents", "Évaluez les compétences de l’appel de 1 à 5 étoiles et définissez un suivi concret pour chaque agent.", '<button class="btn btn-primary" data-action="new-debrief">' + ic("plus") + " Nouveau débrief</button>")}
     <div class="kpi-grid">${kpiCard("Formulaires remplis", String(metrics.completedCount), "file-text", "blue", "", `${metrics.sessionCount} session(s) au total`)}${kpiCard("Moyenne des notes", metrics.average == null ? "—" : `${metrics.average.toFixed(1)} / 5`, "target", "purple", "", `${metrics.completedCount} formulaire(s) complet(s)`)}${kpiCard("Agents évalués", String(metrics.agentCount), "users", "green", "", `uniques · ${metrics.completedCount} formulaire(s) rempli(s)`)}${kpiCard("Actions de suivi", String(metrics.openActionCount), "check-square", metrics.overdueActionCount ? "amber" : "blue", "", `${metrics.overdueActionCount} en retard · ${metrics.actionCount} au total`)}</div>
-    <section class="panel table-panel"><div class="panel-header"><div><h2 class="panel-title">Débriefs</h2><p class="panel-subtitle">Cliquez sur une ligne pour ouvrir le débrief.</p></div><div class="table-header-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${filterInput("agent", "Agent")}${filterInput("dossier", "N° dossier")}${filterInput("note", "Note")}${filterInput("score", "Score")}${canManageDebriefs() ? `<select class="filter-select" data-filter="debriefView"><option value="active" ${!showArchivedDebriefs ? "selected" : ""}>Débriefs actifs</option><option value="archived" ${showArchivedDebriefs ? "selected" : ""}>Débriefs supprimés</option></select>` : ""}</div></div><div id="debriefTable">${renderDebriefTable()}</div></section>`;
+    <section class="panel table-panel"><div class="panel-header"><div><h2 class="panel-title">Débriefs</h2><p class="panel-subtitle">Cliquez sur une ligne pour ouvrir le débrief.</p></div><div class="table-header-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${filterInput("agent", "Agent")}${filterInput("dossier", "N° dossier")}${actionFilterSelect}${filterInput("note", "Note")}${filterInput("score", "Score")}${canManageDebriefs() ? `<select class="filter-select" data-filter="debriefView"><option value="active" ${!showArchivedDebriefs ? "selected" : ""}>Débriefs actifs</option><option value="archived" ${showArchivedDebriefs ? "selected" : ""}>Débriefs supprimés</option></select>` : ""}</div></div><div id="debriefTable">${renderDebriefTable()}</div></section>`;
 }
 const DEBRIEF_RUBRIC = [
   {
@@ -5474,7 +5482,7 @@ function openDebriefModal(recordId = "", agentId = "") {
     (item) =>
       `<fieldset class="debrief-score-row"><legend>${esc(item.title)}</legend><p>${esc(item.hint)}</p><div class="debrief-stars" role="radiogroup" aria-label="${esc(item.title)} · note de 1 à 5 étoiles">${[1, 2, 3, 4, 5].map((value) => `<label title="${value} étoile${value > 1 ? "s" : ""}"><input type="radio" name="rating_${esc(item.key)}" value="${value}" required aria-label="${value} sur 5"/><span aria-hidden="true">★</span></label>`).join("")}</div></fieldset>`,
   ).join("");
-  const body = `<div class="form-grid debrief-basics">${field("agentName", "Agent", { value: initialAgentName, placeholder: "Prérempli depuis le nom de l’enregistrement", required: true, list: "debriefAgentOptions" })}${field("date", "Date du débrief", { type: "date", value: TODAY, required: true })}${field("owner", "Responsable de la session", { select: demoUsers.filter((u) => assignedRole(u.id)?.activities.includes("debriefs")).map((u) => ({ value: u.name, label: u.name, selected: u.name === "Sarah Ben Salem" })), required: true })}</div><datalist id="debriefAgentOptions">${agents.map((agent) => `<option value="${esc(agent.name)}"></option>`).join("")}</datalist><input type="hidden" name="agentId" value="${esc(initialAgentId)}"/>${pointerAudio ? `<section class="record-card"><div class="record-card-header"><h3>Enregistrement audio</h3><span class="subtle">Fiche ${esc(recordIndexValue(selectedRecord))} · écoutez avant de remplir le débrief</span></div><div class="record-card-body" style="padding:10px">${renderAudioCard(selectedRecord)}</div></section><input type="hidden" name="sourceRecordId" value="${esc(selectedRecord.id)}"/>` : `<div class="form-field debrief-audio-upload"><label for="debriefAudioFile">Enregistrement audio du débrief *</label><input id="debriefAudioFile" type="file" name="debriefAudioFile" accept="audio/*,.mp3,.wav,.m4a,.ogg,.aac,.flac,.opus" required/><span class="field-hint">Obligatoire. Le fichier sera associé à cette session. ${backend.enabled ? "Le binaire sera stocké dans S3 Bucket local; DB ne conservera que ses métadonnées." : "Aucun fichier n’est conservé après fermeture de la session de démonstration."}</span></div><details class="debrief-filename-fields" open><summary>Informations extraites du nom de l’enregistrement · modifiables</summary><p class="debrief-filename-hint">Même découpage que pour une fiche d’appel : les champs reconnus sont préremplis et modifiables. Les autres segments ne sont pas affichés; le nom original reste conservé pour traçabilité.</p><div class="form-grid">${field("debriefFilenameEmployeeCode", "Matricule du fichier", { placeholder: "Préfixe numérique du segment 2" })}${field("debriefFilenameCivility", "Civilité détectée", { placeholder: "F / M / Mme" })}${field("debriefSessionTime", "Heure du débrief", { type: "time", step: "1" })}${field("debriefExtension", "N° de poste · segment 1")}${field("debriefSourceIndex", "Indice source · segment 5")}${field("debriefBaseName", "Nom de base · segment 8")}${field("debriefCampaignCode", "Code campagne déduit de la base")}${field("debriefProspectNumber", "Numéro de prospect · segment 7")}</div></details>`}<input type="hidden" name="debriefFilenameAgent" value=""/><input type="hidden" name="debriefFilenameParts" value="[]"/>${recordId ? `<input type="hidden" name="recordId" value="${esc(recordId)}"/>` : ""}<section class="debrief-rating-panel"><div class="debrief-rating-heading"><div><h3>Évaluation de l’appel</h3><p>Choisissez une note par compétence.</p></div><span>1 = à travailler · 5 = très bien maîtrisé</span></div><div class="debrief-score-list">${ratingRows}</div></section><div class="form-grid debrief-followup"><div class="form-field span-2"><label>Points forts & observations</label><textarea name="note" placeholder="Ex. Accroche claire, script bien maîtrisé, écoute attentive…"></textarea></div>${field("actionTitle", "Action de progression (facultatif)", { placeholder: "Ex. S’entraîner à reformuler la demande" })}${field("actionDue", "Échéance de l’action", { type: "date", value: TODAY })}</div><div class="notice-inline debrief-safety-note">${ic("shield")}<span>Le coaching privilégie l’écoute, le consentement explicite et une clôture respectueuse. L’âge ou la voix ne suffisent pas à évaluer la capacité d’une personne.</span></div>`;
+  const body = `<div class="form-grid debrief-basics">${field("agentName", "Agent", { value: initialAgentName, placeholder: "Prérempli depuis le nom de l’enregistrement", required: true, list: "debriefAgentOptions" })}${field("date", "Date du débrief", { type: "date", value: TODAY, required: true })}${field("owner", "Responsable de la session", { select: demoUsers.filter((u) => assignedRole(u.id)?.activities.includes("debriefs")).map((u) => ({ value: u.name, label: u.name, selected: u.name === "Sarah Ben Salem" })), required: true })}</div><datalist id="debriefAgentOptions">${agents.map((agent) => `<option value="${esc(agent.name)}"></option>`).join("")}</datalist><input type="hidden" name="agentId" value="${esc(initialAgentId)}"/>${pointerAudio ? `<section class="record-card"><div class="record-card-header"><h3>Enregistrement audio</h3><span class="subtle">Fiche ${esc(recordIndexValue(selectedRecord))} · écoutez avant de remplir le débrief</span></div><div class="record-card-body" style="padding:10px">${renderAudioCard(selectedRecord)}</div></section><input type="hidden" name="sourceRecordId" value="${esc(selectedRecord.id)}"/>` : `<div class="form-field debrief-audio-upload"><label for="debriefAudioFile">Enregistrement audio du débrief *</label><input id="debriefAudioFile" type="file" name="debriefAudioFile" accept="audio/*,.mp3,.wav,.m4a,.ogg,.aac,.flac,.opus" required/><span class="field-hint">Obligatoire. Le fichier sera associé à cette session. ${backend.enabled ? "Le binaire sera stocké dans S3 Bucket local; DB ne conservera que ses métadonnées." : "Aucun fichier n’est conservé après fermeture de la session de démonstration."}</span></div><details class="debrief-filename-fields" open><summary>Informations extraites du nom de l’enregistrement · modifiables</summary><p class="debrief-filename-hint">Même découpage que pour une fiche d’appel : les champs reconnus sont préremplis et modifiables. Les autres segments ne sont pas affichés; le nom original reste conservé pour traçabilité.</p><div class="form-grid">${field("debriefFilenameEmployeeCode", "Matricule du fichier", { placeholder: "Préfixe numérique du segment 2" })}${field("debriefFilenameCivility", "Civilité détectée", { placeholder: "F / M / Mme" })}${field("debriefSessionTime", "Heure du débrief", { type: "time", step: "1" })}${field("debriefExtension", "N° de poste · segment 1")}${field("debriefSourceIndex", "Indice source · segment 5")}${field("debriefBaseName", "Nom de base · segment 8")}${field("debriefCampaignCode", "Code campagne déduit de la base")}${field("debriefProspectNumber", "Numéro de prospect · segment 7")}</div></details>`}<input type="hidden" name="debriefFilenameAgent" value=""/><input type="hidden" name="debriefFilenameParts" value="[]"/>${recordId ? `<input type="hidden" name="recordId" value="${esc(recordId)}"/>` : ""}<section class="debrief-rating-panel"><div class="debrief-rating-heading"><div><h3>Évaluation de l’appel</h3><p>Choisissez une note par compétence.</p></div><span>1 = à travailler · 5 = très bien maîtrisé</span></div><div class="debrief-score-list">${ratingRows}</div></section><div class="form-grid debrief-followup"><div class="form-field span-2"><label>Points forts & observations</label><textarea name="note" placeholder="Ex. Accroche claire, script bien maîtrisé, écoute attentive…"></textarea></div>${field("actionTitle", "Action de progression", { placeholder: "Ex. S’entraîner à reformuler la demande" })}${field("actionDue", "Échéance de l’action", { type: "date", value: TODAY })}</div><div class="notice-inline debrief-safety-note">${ic("shield")}<span>Le coaching privilégie l’écoute, le consentement explicite et une clôture respectueuse. L’âge ou la voix ne suffisent pas à évaluer la capacité d’une personne.</span></div>`;
   showModal({
     title: "Créer un débrief agent",
     description:
@@ -7159,6 +7167,14 @@ async function refreshDebriefsFromServer() {
     const archived =
       (await apiRequest("/quality/api/debriefs?view=archived")).debriefs || [];
     state.debriefs = [...active, ...archived];
+    const [activeTitles, archivedTitles] = await Promise.all(
+      ["active", "archived"].map((view) =>
+        apiRequest(`/quality/api/debriefs/action-titles?view=${view}`)
+          .then((result) => result.titles || [])
+          .catch(() => []),
+      ),
+    );
+    app.debriefActionTitles = { active: activeTitles, archived: archivedTitles };
     if (app.page === "debriefs" && !modalRoot.classList.contains("open"))
       render();
   } catch (error) {
