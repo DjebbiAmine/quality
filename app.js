@@ -6200,7 +6200,6 @@ const cancelReasonOptions = [
   ["AUCUNE", "Aucune"],
   ["PROD", "PROD"],
   ["AGENT", "AGENT"],
-  ["A_ANNULER", "X - À annuler"],
 ];
 function internalResultFields(stage, record) {
   if (stage === "internal2") {
