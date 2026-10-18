@@ -2590,6 +2590,23 @@ function finalReturnStatusLabel(value) {
     "—"
   );
 }
+// Statut initial du don (évaluation Synergy #1) : extra.donStatus + extra.cancelReason de crm_record_evaluations.
+function qualityLabel(record) {
+  const ev = record?.internal1;
+  const don = ev?.donStatus || ev?.conformity;
+  if (!don) return "";
+  if (don === "CONFORME") return "CONFORME";
+  const reason = { AGENT: "AGENT", PROD: "PRODUCTION", PRODUCTION: "PRODUCTION" }[
+    String(ev.cancelReason || "").toUpperCase()
+  ];
+  return reason ? `NON CONFORME#${reason}` : "NON CONFORME";
+}
+function qualityCell(record) {
+  const label = qualityLabel(record);
+  if (!label) return '<span class="muted">—</span>';
+  const tone = label === "CONFORME" ? "green" : "red";
+  return `<span class="label-chip ${tone}">${esc(label)}</span>`;
+}
 function responseCell(title, primary, secondary = "", detail = "") {
   return `<div class="record-form-response">${title ? `<small class="record-response-label">${esc(title)}</small>` : ""}<strong>${esc(primary || "—")}</strong>${secondary ? `<small>${esc(secondary)}</small>` : ""}${detail ? `<small class="record-response-detail" title="${esc(detail)}">${esc(detail)}</small>` : ""}</div>`;
 }
@@ -2598,7 +2615,7 @@ function renderRecordsTable(rows, opts = {}) {
   const selectionMode = sendMode;
   if (!rows.length)
     return `<div class="empty-state"><div class="empty-icon">${ic("clipboard")}</div><strong>Aucune fiche à afficher</strong><p>Ajustez les filtres ou créez un nouvel enregistrement audio.</p><button class="btn btn-primary btn-small" data-action="new-record">${ic("plus")} Nouvel enregistrement</button></div>`;
-  return `<table class="data-table"><thead><tr>${selectionMode ? '<th style="width:35px"></th>' : ""}<th>Fiche</th><th>Date d’appel</th><th>Date de clôture</th><th>Dossier</th><th>Agent</th><th>Indice</th><th>Retour client</th><th>Réévaluation</th><th>Retour final</th><th>Libellés</th><th>Statut</th></tr></thead><tbody>${rows
+  return `<table class="data-table"><thead><tr>${selectionMode ? '<th style="width:35px"></th>' : ""}<th>Fiche</th><th>Date d’appel</th><th>Dossier</th><th>Agent</th><th>Indice</th><th>Qualité</th><th>Retour client</th><th>Réévaluation</th><th>Retour final</th><th>Statut</th></tr></thead><tbody>${rows
     .map((r) => {
       const returns = getClientReturns(r);
       const latest = latestClientReturn(r);
@@ -2632,23 +2649,13 @@ function renderRecordsTable(rows, opts = {}) {
             }
           : null);
       const finalCell = finalEntry
-        ? responseCell(
-            "Retour final",
-            finalReturnStatusLabel(finalEntry.status || finalEntry.decision),
-            formatDate(finalEntry.date || finalEntry.receivedAt, {
-              time: true,
-            }),
-          )
-        : responseCell("Retour final", "—");
-      const labels = (r.labels || []).map(getLabel).filter(Boolean);
-      const labelsHtml = labels.length
-        ? `<div class="record-labels">${labels.map(labelChip).join("")}</div>`
+        ? `<strong>${esc(finalReturnStatusLabel(finalEntry.status || finalEntry.decision))}</strong>`
         : '<span class="muted">—</span>';
       const selected = app.selectedToSend.has(r.id);
       const checkbox = sendMode
         ? `<td><input class="batch-select" type="checkbox" data-send-select="${esc(r.id)}" ${selected ? "checked" : ""} aria-label="Sélectionner l’indice ${esc(recordIndexValue(r))}"></td>`
         : "";
-      return `<tr data-open-record="${esc(r.id)}">${checkbox}<td class="record-open-cell"><button class="icon-button record-action-button" type="button" data-action="open-record" data-record-id="${esc(r.id)}" onclick="return window.openQualiContactRecord(event,this.dataset.recordId)" title="Modifier la fiche" aria-label="Modifier la fiche ${esc(recordIndexValue(r))}">${ic("edit")}</button>${!selectionMode && !r.archived && canManageRecords() ? `<button class="icon-button record-action-button record-action-delete" type="button" data-action="archive-record" data-record-id="${esc(r.id)}" title="Supprimer la fiche" aria-label="Supprimer la fiche ${esc(recordIndexValue(r))}">${ic("trash")}</button>` : ""}</td><td>${formatDate(r.callDate)}</td><td>${r.closedAt ? formatDate(r.closedAt) : "—"}</td><td><span class="record-source-index"><strong>${esc(r.baseName || "—")}</strong><small>${esc(r.campaign || "")}</small></span></td><td><span class="agent-cell">${avatar(r.agent)}<span class="agent-cell-copy"><strong>${esc(r.agent)}</strong><small>${r.employeeCode ? esc(r.employeeCode) : r.agentCodeFromFilename ? `Candidat ${esc(r.agentCodeFromFilename)}` : "À rattacher"}</small></span></span></td><td class="record-id">${esc(recordIndexValue(r))}</td><td>${returnCell}</td><td>${reevaluation}</td><td>${finalCell}</td><td>${labelsHtml}</td><td>${recordBadge(r)}</td></tr>`;
+      return `<tr data-open-record="${esc(r.id)}">${checkbox}<td class="record-open-cell"><button class="icon-button record-action-button" type="button" data-action="open-record" data-record-id="${esc(r.id)}" onclick="return window.openQualiContactRecord(event,this.dataset.recordId)" title="Modifier la fiche" aria-label="Modifier la fiche ${esc(recordIndexValue(r))}">${ic("edit")}</button>${!selectionMode && !r.archived && canManageRecords() ? `<button class="icon-button record-action-button record-action-delete" type="button" data-action="archive-record" data-record-id="${esc(r.id)}" title="Supprimer la fiche" aria-label="Supprimer la fiche ${esc(recordIndexValue(r))}">${ic("trash")}</button>` : ""}</td><td>${formatDate(r.callDate)}</td><td><span class="record-source-index"><strong>${esc(r.baseName || "—")}</strong><small>${esc(r.campaign || "")}</small></span></td><td><span class="agent-cell">${avatar(r.agent)}<span class="agent-cell-copy"><strong>${esc(r.agent)}</strong><small>${r.employeeCode ? esc(r.employeeCode) : r.agentCodeFromFilename ? `Candidat ${esc(r.agentCodeFromFilename)}` : "À rattacher"}</small></span></span></td><td class="record-id">${esc(recordIndexValue(r))}</td><td>${qualityCell(r)}</td><td>${returnCell}</td><td>${reevaluation}</td><td>${finalCell}</td><td>${recordBadge(r)}</td></tr>`;
     })
     .join("")}</tbody></table>`;
 }
