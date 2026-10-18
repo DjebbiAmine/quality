@@ -47,17 +47,21 @@ function parseGroupBody(body, { partial = false } = {}) {
 }
 function parseCriterionBody(body) {
   const input = isPlainObject(body) ? body : {};
-  const unknown = Object.keys(input).filter(key => !['stage', 'section', 'label', 'type', 'description', 'weight', 'groupId'].includes(key));
+  const unknown = Object.keys(input).filter(key => !['stage', 'section', 'label', 'type', 'description', 'weight', 'groupId', 'scaleSize'].includes(key));
   if (unknown.length) throw invalid(`Champ(s) non autorisé(s) : ${unknown.join(', ')}.`);
   const stage = String(input.stage ?? '');
   if (!STAGES.includes(stage)) throw invalid('Étape de grille inconnue.');
   const type = String(input.type ?? '');
   if (!CRITERION_TYPES.includes(type)) throw invalid('Type de critère inconnu.');
   const weight = input.weight === undefined || input.weight === null || input.weight === '' ? 1 : Number(input.weight);
-  if (!Number.isFinite(weight) || weight <= 0 || weight > 1000) throw invalid('Le poids doit être un nombre positif.');
+  // Poids -1 = négation (une réponse OK retire un point) ; sinon un nombre positif.
+  if (!Number.isFinite(weight) || (weight !== -1 && weight <= 0) || weight > 1000) throw invalid('Le poids doit être un nombre positif, ou -1 pour une négation.');
+  // Taille de l'échelle (type « scale ») : la réponse v vaut v / taille.
+  const scaleSize = input.scaleSize === undefined || input.scaleSize === null || input.scaleSize === '' ? 5 : Number(input.scaleSize);
+  if (type === 'scale' && (!Number.isInteger(scaleSize) || scaleSize < 2 || scaleSize > 10)) throw invalid('La taille de l’échelle doit être un entier de 2 à 10.');
   const groupId = String(input.groupId ?? '').trim();
   if (LIST_TYPES.includes(type) && !groupId) throw invalid('Choisissez un groupe d’options pour ce type de réponse.');
-  return { stage, type, weight, section: shortText(input.section, 200, 'La section'), label: shortText(input.label, 300, 'Le libellé du critère', true), description: shortText(input.description, 1000, 'La description'), groupId: LIST_TYPES.includes(type) ? groupId : '' };
+  return { stage, type, weight, ...(type === 'scale' ? { scaleSize } : {}), section: shortText(input.section, 200, 'La section'), label: shortText(input.label, 300, 'Le libellé du critère', true), description: shortText(input.description, 1000, 'La description'), groupId: LIST_TYPES.includes(type) ? groupId : '' };
 }
 // Construit le groupe à enregistrer (identifiants d'options conservés quand le libellé existe déjà).
 function buildGroup(id, values, previous) {
@@ -66,6 +70,7 @@ function buildGroup(id, values, previous) {
 }
 function buildCriterion(values, group) {
   const criterion = { id: `crit-${crypto.randomUUID()}`, section: values.section, label: values.label, type: values.type, description: values.description, weight: values.weight };
+  if (values.type === 'scale') criterion.scaleSize = values.scaleSize;
   if (LIST_TYPES.includes(values.type)) Object.assign(criterion, { groupId: group.id, groupName: group.name, options: group.options.map(option => ({ ...option })) });
   return criterion;
 }

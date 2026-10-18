@@ -5503,14 +5503,14 @@ function openCriterionModal(stage) {
       select: [
         { value: "ok_x", label: "OK / X + justification", selected: true },
         { value: "conformity", label: "Conforme / Non conforme / N/A" },
-        { value: "scale", label: "Échelle de 1 à 5" },
+        { value: "scale", label: "Échelle (de 1 à N)" },
         { value: "select", label: "Liste déroulante (groupe d’options)" },
         { value: "checkbox", label: "Cases à cocher (groupe d’options)" },
         { value: "text", label: "Texte libre" },
       ],
       required: true,
     },
-  )}${field("groupId", "Groupe d’options", { select: [{ value: "", label: "— Aucun —", selected: true }, ...(state.optionGroups || []).map((g) => ({ value: g.id, label: g.name }))], hint: "Obligatoire pour « Liste déroulante » et « Cases à cocher ». Les groupes se créent dans Paramètres › Groupes d’options." })}${field("weight", "Poids du critère", { type: "number", value: "1", min: "1", required: true })}</div><div class="settings-callout">${ic("info")}<span>Saisissez uniquement un critère validé de la grille réelle. Aucun libellé n’est suggéré par l’application.</span></div>`;
+  )}${field("groupId", "Groupe d’options", { select: [{ value: "", label: "— Aucun —", selected: true }, ...(state.optionGroups || []).map((g) => ({ value: g.id, label: g.name }))], hint: "Obligatoire pour « Liste déroulante » et « Cases à cocher ». Les groupes se créent dans Paramètres › Groupes d’options." })}${field("scaleSize", "Taille de l’échelle", { type: "number", value: "5", min: "2", hint: "Échelle seulement : de 2 à 10 réponses. La réponse 5 sur une échelle de 7 vaut 5/7." })}${field("weight", "Poids du critère", { type: "number", value: "1", min: "-1", required: true, hint: "Poids négatif (-1) = négation : une réponse OK retire un point au score." })}</div><div class="settings-callout">${ic("info")}<span>Saisissez uniquement un critère validé de la grille réelle. Aucun libellé n’est suggéré par l’application.</span></div>`;
   showModal({
     title: `Ajouter à ${stageTitles[stage]}`,
     description:
@@ -6353,7 +6353,7 @@ function renderEvalQuestion(c) {
   else if (c.type === "text")
     control = `<textarea name="${esc(name)}" class="form-control textarea" placeholder="Réponse" required></textarea>`;
   else if (c.type === "scale")
-    control = `<div class="choice-row">${[1, 2, 3, 4, 5].map((n) => `<label class="choice-chip"><input type="radio" name="${esc(name)}" value="${n}" required/>${n}</label>`).join("")}</div>`;
+    control = `<div class="choice-row">${Array.from({ length: criterionScaleSize(c) }, (_, i) => i + 1).map((n) => `<label class="choice-chip"><input type="radio" name="${esc(name)}" value="${n}" required/>${n}</label>`).join("")}</div>`;
   else if (c.type === "select")
     control = `<select name="${esc(name)}" class="form-control" required><option value="">Choisir…</option>${(c.options || []).map((o) => `<option value="${esc(o.id)}">${esc(o.label)}</option>`).join("")}</select>`;
   else if (c.type === "checkbox")
@@ -6377,27 +6377,44 @@ function optionAnswerPoints(c, value) {
       )
     : null;
 }
+// Taille d'une échelle (nombre de réponses possibles, de 1 à N) ; 5 par défaut pour les anciens critères.
+function criterionScaleSize(c) {
+  const size = Number(c?.scaleSize);
+  return Number.isInteger(size) && size >= 2 ? size : 5;
+}
+// Fraction de réussite d'une réponse, entre 0 et 1 ; null si le critère est ignoré (sans réponse, texte, N/A, option inconnue).
+function criterionFraction(c, value) {
+  if (value == null || value === "" || value === "n_a") return null;
+  switch (c.type) {
+    case "select":
+    case "checkbox": {
+      const points = optionAnswerPoints(c, value);
+      return points == null ? null : points / 100;
+    }
+    case "scale":
+      return Number(value) / criterionScaleSize(c); // ex. 5 sur une échelle de 10 = 5/10
+    case "ok_x":
+    case "conformity":
+      return ["OK", "conforme"].includes(value) ? 1 : 0; // X = 0
+    default:
+      return null; // texte libre
+  }
+}
+// Score général : Σ (fraction × poids) ÷ Σ |poids|, en %. Un poids -1 est une négation (« OK » retire un point).
+// Ex. OK (poids 1), OK (poids -1), échelle de 10 à 5 (poids 1) : (1 − 1 + 0,5) / 3 = 17 %.
 function scoreFromAnswers(criteria, answers) {
   let earned = 0,
     max = 0;
   criteria.forEach((c) => {
-    const value = answers[c.id];
+    const fraction = criterionFraction(c, answers[c.id]);
+    if (fraction == null) return;
     const weight = Number(c.weight) || 1;
-    if (value == null || value === "") return;
-    if (c.type === "select" || c.type === "checkbox") {
-      const points = optionAnswerPoints(c, value);
-      if (points == null) return;
-      max += weight;
-      earned += (points / 100) * weight;
-      return;
-    }
-    if (c.type === "text" || value === "n_a") return;
-    max += weight;
-    if (c.type === "scale") earned += ((Number(value) - 1) / 4) * weight;
-    else if (c.type === "ok_x" || c.type === "conformity")
-      earned += ["OK", "conforme"].includes(value) ? weight : 0;
+    earned += fraction * weight;
+    max += Math.abs(weight);
   });
-  return max ? Math.round((earned / max) * 100) : null;
+  return max
+    ? Math.min(100, Math.max(0, Math.round((earned / max) * 100)))
+    : null;
 }
 function archiveEvaluationVersion(r, stage) {
   r.evaluationHistory = Array.isArray(r.evaluationHistory)
@@ -6422,6 +6439,7 @@ function evaluationCriteriaSnapshot(criteria) {
     description: c.description || "",
     type: c.type,
     weight: Number(c.weight) || 1,
+    ...(c.type === "scale" ? { scaleSize: criterionScaleSize(c) } : {}),
     ...(c.options
       ? {
           groupId: c.groupId || "",
@@ -8119,6 +8137,7 @@ function createCriterion(form) {
           type,
           description: fd.get("description") || "",
           weight: Number(fd.get("weight")) || 1,
+          ...(type === "scale" ? { scaleSize: Number(fd.get("scaleSize")) || 5 } : {}),
           groupId: extra.groupId || "",
         },
       }),
@@ -8144,6 +8163,7 @@ function createCriterion(form) {
     type,
     description: fd.get("description") || "",
     weight: Number(fd.get("weight")) || 1,
+    ...(type === "scale" ? { scaleSize: Number(fd.get("scaleSize")) || 5 } : {}),
     ...extra,
   });
   saveState();
