@@ -5,8 +5,9 @@
 //   PATCH  /quality/api/agents/:id            { name, team, since } (le matricule est immuable)
 //   DELETE /quality/api/agents/:id            refusé tant que l'agent est lié à une fiche ou à un débrief actif
 const { loadAgents } = require('./agents-store');
-const { normalizeEmployeeCode, sameAgentIdentity } = require('./rbac');
-const { fail, isRealDate, makeTransaction, bumpStateVersion } = require('./api-common');
+const { loadAgentScores } = require('./relational-store');
+const { normalizeEmployeeCode, normalizeAgentText, sameAgentIdentity } = require('./rbac');
+const { fail, hasPermission, isRealDate, makeTransaction, bumpStateVersion } = require('./api-common');
 
 const invalid = message => fail(400, 'AGENT_INVALID', message);
 const agentInitials = name => { const words = String(name || '').trim().split(/\s+/).filter(Boolean); return ((words[0]?.[0] || '') + (words.length > 1 ? words[words.length - 1][0] : '')).toUpperCase(); };
@@ -35,6 +36,14 @@ function registerAgentRoutes(app, { pool, requireAuth, requireReadyPassword, req
   const guard = [requireAuth, requireReadyPassword, requireAnyPermission(['records_manage', 'quality_settings'])];
   const inTransaction = makeTransaction(pool);
 
+  // Score moyen de chaque agent (carte « Agents & progression ») : une requête SQL, sans charger les fiches.
+  app.get('/quality/api/agents/scores', requireAuth, requireReadyPassword, requireAnyPermission(['records_manage', 'quality_settings', 'agents', 'records_view']), async (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    if (!hasPermission(req.auth, 'synergy1')) return res.json({ scores: {} });
+    const scope = {};
+    if (!hasPermission(req.auth, 'records_view_all')) { scope.restrictedUserId = String(req.auth.id || ''); scope.restrictedName = normalizeAgentText(req.auth.fullName || ''); }
+    res.json({ scores: await loadAgentScores(pool, { scope }) });
+  });
   app.get('/quality/api/agents', requireAuth, requireReadyPassword, requireAnyPermission(['records_manage', 'quality_settings', 'agents', 'records_view']), async (req, res) => { res.set('Cache-Control', 'private, no-store'); res.json({ agents: await loadAgents(pool) }); });
 
   app.post('/quality/api/agents', ...guard, async (req, res) => {

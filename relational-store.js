@@ -191,6 +191,23 @@ async function countRecords(db,{archived=false,filters,scope}={}){
   const {whereSql,params}=buildRecordListWhere({archived,filters,scope});
   return (await db.query(`select count(*)::int as n from public.crm_records r where ${whereSql}`,params)).rows[0].n;
 }
+// Score moyen par agent : moyenne des scores Synergy #1 courants de ses fiches (même identité d'agent que sameAgentIdentity :
+// matricule normalisé si les deux en ont un, sinon nom normalisé). Calculé en SQL, limité aux fiches visibles du profil.
+const SQL_NORM_CODE=column=>`regexp_replace(regexp_replace(upper(coalesce(${column},'')),'[^A-Z0-9]','','g'),'^(AGENT|AG)','')`;
+async function loadAgentScores(db,{scope}={}){
+  const {whereSql,params}=buildRecordListWhere({archived:false,scope});
+  const rows=(await db.query(`
+    with visible as (select r.id, r.employee_code, r.agent from public.crm_records r where ${whereSql}),
+    scored as (select v.id, v.employee_code, v.agent, e.score from visible v
+      join public.crm_record_evaluations e on e.record_id = v.id and e.stage = 'internal1' and e.is_current and e.score is not null)
+    select a.matricule as id, round(avg(s.score))::int as average, count(*)::int as count
+      from public.crm_agents a
+      join scored s on case when ${SQL_NORM_CODE('a.matricule')} <> '' and ${SQL_NORM_CODE('s.employee_code')} <> ''
+        then ${SQL_NORM_CODE('a.matricule')} = ${SQL_NORM_CODE('s.employee_code')}
+        else ${SQL_NORM_TEXT('a.name')} <> '' and ${SQL_NORM_TEXT('a.name')} = ${SQL_NORM_TEXT('s.agent')} end
+      group by a.matricule`,params)).rows;
+  return Object.fromEntries(rows.map(row=>[row.id,{average:row.average,count:row.count}]));
+}
 async function loadRecordsPage(db,{archived=false,filters,search,compliance,scope,page=1,pageSize=10}){
   const {whereSql,params}=buildRecordListWhere({archived,filters,search,compliance,scope});
   const fetchIds=async current=>(await db.query(`select r.id from public.crm_records r where ${whereSql} order by ${RECORD_LIST_ORDER.replace(/\b(call_date|call_time|created_at|id)\b/g,'r.$1')} limit $${params.length+1} offset $${params.length+2}`,[...params,pageSize,(current-1)*pageSize])).rows.map(row=>row.id);
@@ -594,4 +611,4 @@ function canonicalizeRelational(state){
 }
 
 const RELATIONAL_KEYS=['records','events','batches','tasks','debriefs','criteriaByStage','optionGroups'];
-module.exports={loadGrids,saveOptionGroup,saveCriterion,deleteCriterionRow,deleteOptionGroupRow,loadRecords,loadRecordsPage,countRecords,lockRecord,saveRecord,nextRecordId,loadDebriefs,lockDebrief,saveDebrief,nextDebriefId,loadTasks,lockTask,saveTask,saveEvent,canonicalizeRelational,loadRelational,insertRelational,persistRelational,diffStates,counts,looseEqual,loose,RELATIONAL_KEYS,STAGES};
+module.exports={loadGrids,saveOptionGroup,saveCriterion,deleteCriterionRow,deleteOptionGroupRow,loadRecords,loadRecordsPage,countRecords,loadAgentScores,lockRecord,saveRecord,nextRecordId,loadDebriefs,lockDebrief,saveDebrief,nextDebriefId,loadTasks,lockTask,saveTask,saveEvent,canonicalizeRelational,loadRelational,insertRelational,persistRelational,diffStates,counts,looseEqual,loose,RELATIONAL_KEYS,STAGES};

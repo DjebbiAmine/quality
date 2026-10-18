@@ -1094,6 +1094,7 @@ const app = {
   sendQuerySig: "",
   sendList: { rows: [], total: 0, pages: 1, loaded: false, error: "" },
   debriefView: "active",
+  agentScores: {},
   debriefActionTitles: { active: [], archived: [] },
   debriefFilters: { agent: "", dossier: "", action: "", note: "", score: "" },
   debriefPage: 1,
@@ -1674,6 +1675,7 @@ function recordApiCall(
       app.recordQuerySig = "";
       app.sendQuerySig = "";
       refreshSendKpi();
+      refreshAgentScores();
       render();
       toast(successMessage, tone);
     })
@@ -3289,13 +3291,8 @@ function renderAgents() {
 function agentCard(a) {
   const rows = recordsForAgent(a);
   const evaluated = rows.filter(isSynergy1Evaluated);
-  const scores = evaluated
-    .filter((record) => hasNumericScore(record.internal1?.score))
-    .map((record) => Number(record.internal1.score))
-    .filter(Number.isFinite);
-  const score = scores.length
-    ? Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length)
-    : null;
+  // Moyenne des scores Synergy #1 de l'agent, calculée en SQL par le serveur (GET /quality/api/agents/scores).
+  const score = app.agentScores[a.id]?.average ?? null;
   const returns = rows.reduce(
     (sum, record) => sum + getClientReturns(record).length,
     0,
@@ -4652,6 +4649,17 @@ function syncSendNavCount() {
       backend.authenticated &&
       !backend.permissions.has("client_send"));
 }
+async function refreshAgentScores() {
+  if (!useRecordApi()) return;
+  try {
+    app.agentScores =
+      (await apiRequest("/quality/api/agents/scores")).scores || {};
+    if (app.page === "agents" && !modalRoot.classList.contains("open"))
+      render();
+  } catch (error) {
+    console.warn("Scores des agents indisponibles", error);
+  }
+}
 async function refreshDashboardData() {
   if (
     !backend.enabled ||
@@ -5070,6 +5078,7 @@ function goPage(page) {
   app.page = page;
   if (page === "record" && !app.recordId) app.recordId = state.records[0]?.id;
   closeSidebar();
+  if (page === "agents") refreshAgentScores();
   if (page === "send") {
     app.sendQuerySig = "";
     refreshSendKpi();
