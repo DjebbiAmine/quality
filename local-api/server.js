@@ -336,9 +336,26 @@ app.get('/quality/quality/api/audio/:id',requireAuth,requireReadyPassword,async(
     if(!clientScoped&&!canReadAnyCall)return res.status(403).json({error:'Permission fiche requise.'});
     if(!canAccessCallAudio(req.auth,audio,stateData))return res.status(404).json({error:'Audio non associé à une fiche disponible ou hors du périmètre autorisé.'});
   }
-  const object=await s3.send(new GetObjectCommand({Bucket:process.env.MINIO_BUCKET,Key:audio.object_key}));
-  res.set('Content-Type',audio.mime_type);res.set('Content-Length',String(audio.byte_size));res.set('Content-Disposition',`inline; filename*=UTF-8''${encodeURIComponent(audio.original_name)}`);res.set('Cache-Control','private, no-store');
-  if(object.Body?.pipe)object.Body.pipe(res);else res.status(500).json({error:'Flux audio indisponible.'});
+  // Lecture partielle (HTTP Range) : indispensable pour avancer/reculer dans le lecteur audio du navigateur.
+  const total=Number(audio.byte_size)||0;
+  res.set('Content-Type',audio.mime_type);res.set('Accept-Ranges','bytes');res.set('Content-Disposition',`inline; filename*=UTF-8''${encodeURIComponent(audio.original_name)}`);res.set('Cache-Control','private, no-store');
+  let start=0,end=total-1,partial=false;
+  const rangeHeader=req.get('range');
+  if(rangeHeader&&total>0){
+    const match=/^bytes=(\d*)-(\d*)$/.exec(String(rangeHeader).trim());
+    if(match&&(match[1]!==''||match[2]!=='')){
+      if(match[1]===''){start=Math.max(0,total-Number(match[2]));end=total-1}
+      else{start=Number(match[1]);end=match[2]===''?total-1:Math.min(Number(match[2]),total-1)}
+      if(start>end||start>=total){res.set('Content-Range',`bytes */${total}`);return res.status(416).end()}
+      partial=true;
+    }
+  }
+  const object=await s3.send(new GetObjectCommand({Bucket:process.env.MINIO_BUCKET,Key:audio.object_key,...(partial?{Range:`bytes=${start}-${end}`}:{})}));
+  if(!object.Body?.pipe)return res.status(500).json({error:'Flux audio indisponible.'});
+  if(partial){res.status(206);res.set('Content-Range',`bytes ${start}-${end}/${total}`);res.set('Content-Length',String(end-start+1))}
+  else res.set('Content-Length',String(total));
+  object.Body.on('error',()=>res.destroy());
+  object.Body.pipe(res);
 });
 
 // Le serveur ne publie que les ressources nécessaires à l’application; .env, SQL et fichiers internes restent privés.
