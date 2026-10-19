@@ -35,7 +35,6 @@ function parseEvaluationBody(body) {
   }
   const answers = input.answers ?? {}; const answerComments = input.answerComments ?? {};
   if (!isPlainObject(answers) || !isPlainObject(answerComments)) throw invalid('Réponses d’évaluation invalides.');
-  for (const [key, value] of Object.entries(answers)) if (value === 'X' && !String(answerComments[key] ?? '').trim()) throw invalid('Ajoutez une justification pour chaque réponse X.');
   const score = input.score == null || input.score === '' ? null : Number(input.score);
   if (score !== null && (!Number.isFinite(score) || score < 0 || score > 100)) throw invalid('Le score doit être compris entre 0 et 100.');
   const amount = input.amount == null || input.amount === '' ? null : Number(input.amount);

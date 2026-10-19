@@ -6357,7 +6357,7 @@ function renderEvalQuestion(c) {
   const name = `answer_${c.id}`;
   let control = "";
   if (c.type === "ok_x")
-    control = `<div class="choice-row ok-x-row"><label class="ok-x-choice"><input type="radio" name="${esc(name)}" value="OK" required/><span>OK</span></label><label class="ok-x-choice"><input type="radio" name="${esc(name)}" value="X"/><span>X</span></label></div><textarea name="justification_${esc(c.id)}" class="criterion-justification" placeholder="Justification..."></textarea>`;
+    control = `<div class="choice-row ok-x-row"><label class="ok-x-choice"><input type="radio" name="${esc(name)}" value="OK" required/><span>OK</span></label><label class="ok-x-choice"><input type="radio" name="${esc(name)}" value="X"/><span>X</span></label></div><textarea name="justification_${esc(c.id)}" class="criterion-justification" placeholder="Justification (facultative)..."></textarea>`;
   else if (c.type === "text")
     control = `<textarea name="${esc(name)}" class="form-control textarea" placeholder="Réponse" required></textarea>`;
   else if (c.type === "scale")
@@ -6390,34 +6390,37 @@ function criterionScaleSize(c) {
   const size = Number(c?.scaleSize);
   return Number.isInteger(size) && size >= 2 ? size : 5;
 }
-// Fraction de réussite d'une réponse, entre 0 et 1 ; null si le critère est ignoré (sans réponse, texte, N/A, option inconnue).
-function criterionFraction(c, value) {
+// Points apportés par une réponse (null : critère ignoré — sans réponse, texte, N/A, option inconnue).
+// OK / X : « OK » vaut le poids ; « X » vaut 0 si le poids est positif, et +1 si le poids est -1 (négation : X est la bonne réponse).
+// Autres types : fraction de réussite (0 à 1) × poids.
+function criterionPoints(c, value, weight) {
   if (value == null || value === "" || value === "n_a") return null;
   switch (c.type) {
+    case "ok_x":
+    case "conformity":
+      if (["OK", "conforme"].includes(value)) return weight;
+      return weight < 0 ? -weight : 0;
+    case "scale":
+      return (Number(value) / criterionScaleSize(c)) * weight; // ex. 5 sur une échelle de 10 = 5/10
     case "select":
     case "checkbox": {
       const points = optionAnswerPoints(c, value);
-      return points == null ? null : points / 100;
+      return points == null ? null : (points / 100) * weight;
     }
-    case "scale":
-      return Number(value) / criterionScaleSize(c); // ex. 5 sur une échelle de 10 = 5/10
-    case "ok_x":
-    case "conformity":
-      return ["OK", "conforme"].includes(value) ? 1 : 0; // X = 0
     default:
       return null; // texte libre
   }
 }
-// Score général : Σ (fraction × poids) ÷ Σ |poids|, en %. Un poids -1 est une négation (« OK » retire un point).
+// Score général : Σ points ÷ Σ |poids|, en %.
 // Ex. OK (poids 1), OK (poids -1), échelle de 10 à 5 (poids 1) : (1 − 1 + 0,5) / 3 = 17 %.
 function scoreFromAnswers(criteria, answers) {
   let earned = 0,
     max = 0;
   criteria.forEach((c) => {
-    const fraction = criterionFraction(c, answers[c.id]);
-    if (fraction == null) return;
     const weight = Number(c.weight) || 1;
-    earned += fraction * weight;
+    const points = criterionPoints(c, answers[c.id], weight);
+    if (points == null) return;
+    earned += points;
     max += Math.abs(weight);
   });
   return max
@@ -6696,15 +6699,6 @@ function saveEvaluation(form) {
     });
     if (criteria.length && criteria.some((c) => answers[c.id] == null)) {
       toast("Répondez à chaque critère avant de terminer.", "warning");
-      return;
-    }
-    if (
-      criteria.some(
-        (c) =>
-          answers[c.id] === "X" && !String(answerComments[c.id] || "").trim(),
-      )
-    ) {
-      toast("Ajoutez une justification pour chaque réponse X.", "warning");
       return;
     }
     const score = scoreFromAnswers(criteria, answers);
