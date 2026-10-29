@@ -18,6 +18,7 @@ const {loadAgents}=require('./agents-store');
 const {loadRelational,persistRelational,canonicalizeRelational,RELATIONAL_KEYS}=require('./relational-store');
 
 const app=express();
+app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(helmet({contentSecurityPolicy:false,crossOriginEmbedderPolicy:false}));
 app.use(express.json({limit:'25mb'}));
