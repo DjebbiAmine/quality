@@ -2613,16 +2613,14 @@ function qualityCell(record) {
   return `<span class="label-chip ${tone}">${esc(label)}</span>`;
 }
 // KPI (extra.donStatus + extra.cancelReason de l'évaluation Synergy #1) : un motif AGENT donne toujours « NON CONFORME »,
-// même si le don est CONFORME ; sinon CONFORME pour un don conforme ou un non-conforme imputé à la PRODUCTION ; le reste est NON CONFORME.
+// même si le don est CONFORME ; sinon CONFORME uniquement pour un don CONFORME ; tout non-conforme (AGENT, PRODUCTION, sans motif) est NON CONFORME.
 function kpiLabel(record) {
   const ev = record?.internal1;
   const don = ev?.donStatus || ev?.conformity;
   if (!don) return "";
   const reason = String(ev.cancelReason || "").toUpperCase();
   if (reason === "AGENT") return "NON CONFORME";
-  if (don === "CONFORME" || reason === "PROD" || reason === "PRODUCTION")
-    return "CONFORME";
-  return "NON CONFORME";
+  return don === "CONFORME" ? "CONFORME" : "NON CONFORME";
 }
 function kpiCell(record) {
   const label = kpiLabel(record);
@@ -8957,6 +8955,8 @@ function exportCsv(rows, filename) {
     ["Statut fiche", "status"],
     ["Synergy #1 · score", "internal1.score"],
     ["Synergy #1 · conformité", "internal1.conformity"],
+    ["Qualité", "quality"],
+    ["KPI", "kpi"],
     ["Synergy #1 · statut final", "internal1.finalStatus"],
     ["Réévaluation · analyse", "internal2.analysisPoleQualite"],
     ["Réévaluation · promesse", "internal2.promiseStatus"],
@@ -8981,6 +8981,8 @@ function exportCsv(rows, filename) {
         date: ev.date,
         statut: finalReturnStatusLabel(ev.status || ev.decision),
       }));
+    if (key === "quality") return qualityLabel(r);
+    if (key === "kpi") return kpiLabel(r);
     if (key === "labels")
       return (r.labels || [])
         .map((id) => getLabel(id)?.name)
