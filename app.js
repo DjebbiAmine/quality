@@ -1071,6 +1071,7 @@ const app = {
     status: "all",
     campaign: "all",
     compliance: "all",
+    kpi: "all",
     archived: "active",
     callFrom: "",
     callTo: "",
@@ -1084,6 +1085,7 @@ const app = {
   filterSend: {
     status: "all",
     campaign: "all",
+    kpi: "all",
     callFrom: "",
     callTo: "",
     closedFrom: "",
@@ -1696,7 +1698,7 @@ function recordListQuery(kind = "records") {
     });
     for (const key of ["callFrom", "callTo", "closedFrom", "closedTo"])
       if (g[key]) sendParams.set(key, g[key]);
-    for (const key of ["status", "campaign"])
+    for (const key of ["status", "campaign", "kpi"])
       if (g[key] && g[key] !== "all") sendParams.set(key, g[key]);
     return sendParams.toString();
   }
@@ -1707,7 +1709,7 @@ function recordListQuery(kind = "records") {
   });
   for (const key of ["search", "callFrom", "callTo", "closedFrom", "closedTo"])
     if (f[key]) params.set(key, f[key]);
-  for (const key of ["status", "campaign", "compliance"])
+  for (const key of ["status", "campaign", "compliance", "kpi"])
     if (f[key] && f[key] !== "all") params.set(key, f[key]);
   return params.toString();
 }
@@ -2610,15 +2612,34 @@ function qualityCell(record) {
   const tone = label === "CONFORME" ? "green" : "red";
   return `<span class="label-chip ${tone}">${esc(label)}</span>`;
 }
+// KPI (extra.donStatus + extra.cancelReason de l'évaluation Synergy #1) : un motif AGENT donne toujours « NON CONFORME »,
+// même si le don est CONFORME ; sinon CONFORME pour un don conforme ou un non-conforme imputé à la PRODUCTION ; le reste est NON CONFORME.
+function kpiLabel(record) {
+  const ev = record?.internal1;
+  const don = ev?.donStatus || ev?.conformity;
+  if (!don) return "";
+  const reason = String(ev.cancelReason || "").toUpperCase();
+  if (reason === "AGENT") return "NON CONFORME";
+  if (don === "CONFORME" || reason === "PROD" || reason === "PRODUCTION")
+    return "CONFORME";
+  return "NON CONFORME";
+}
+function kpiCell(record) {
+  const label = kpiLabel(record);
+  if (!label) return '<span class="muted">—</span>';
+  return `<span class="label-chip ${label === "CONFORME" ? "green" : "red"}">${esc(label)}</span>`;
+}
 function responseCell(title, primary, secondary = "", detail = "") {
   return `<div class="record-form-response">${title ? `<small class="record-response-label">${esc(title)}</small>` : ""}<strong>${esc(primary || "—")}</strong>${secondary ? `<small>${esc(secondary)}</small>` : ""}${detail ? `<small class="record-response-detail" title="${esc(detail)}">${esc(detail)}</small>` : ""}</div>`;
 }
+const kpiFilterSelect = (attr, current) =>
+  `<select class="filter-select" ${attr}="kpi"><option value="all">Tous les KPI</option><option value="CONFORME" ${current === "CONFORME" ? "selected" : ""}>KPI conforme</option><option value="NON_CONFORME" ${current === "NON_CONFORME" ? "selected" : ""}>KPI non conforme</option></select>`;
 function renderRecordsTable(rows, opts = {}) {
   const sendMode = !!opts.sendMode;
   const selectionMode = sendMode;
   if (!rows.length)
     return `<div class="empty-state"><div class="empty-icon">${ic("clipboard")}</div><strong>Aucune fiche à afficher</strong><p>Ajustez les filtres ou créez un nouvel enregistrement audio.</p><button class="btn btn-primary btn-small" data-action="new-record">${ic("plus")} Nouvel enregistrement</button></div>`;
-  return `<table class="data-table"><thead><tr>${selectionMode ? '<th style="width:35px"></th>' : ""}<th>Fiche</th><th>Date d’appel</th><th>Dossier</th><th>Agent</th><th>Indice</th><th>Qualité</th><th>Retour client</th><th>Réévaluation</th><th>Retour final</th><th>Statut</th></tr></thead><tbody>${rows
+  return `<table class="data-table"><thead><tr>${selectionMode ? '<th style="width:35px"></th>' : ""}<th>Fiche</th><th>Date d’appel</th><th>Dossier</th><th>Agent</th><th>Indice</th><th>Qualité</th><th>KPI</th><th>Retour client</th><th>Réévaluation</th><th>Retour final</th><th>Statut</th></tr></thead><tbody>${rows
     .map((r) => {
       const returns = getClientReturns(r);
       const latest = latestClientReturn(r);
@@ -2658,7 +2679,7 @@ function renderRecordsTable(rows, opts = {}) {
       const checkbox = sendMode
         ? `<td><input class="batch-select" type="checkbox" data-send-select="${esc(r.id)}" ${selected ? "checked" : ""} aria-label="Sélectionner l’indice ${esc(recordIndexValue(r))}"></td>`
         : "";
-      return `<tr data-open-record="${esc(r.id)}">${checkbox}<td class="record-open-cell"><button class="icon-button record-action-button" type="button" data-action="open-record" data-record-id="${esc(r.id)}" onclick="return window.openQualiContactRecord(event,this.dataset.recordId)" title="Modifier la fiche" aria-label="Modifier la fiche ${esc(recordIndexValue(r))}">${ic("edit")}</button>${!selectionMode && !r.archived && canManageRecords() ? `<button class="icon-button record-action-button record-action-delete" type="button" data-action="archive-record" data-record-id="${esc(r.id)}" title="Supprimer la fiche" aria-label="Supprimer la fiche ${esc(recordIndexValue(r))}">${ic("trash")}</button>` : ""}</td><td>${formatDate(r.callDate)}</td><td><span class="record-source-index"><strong>${esc(r.baseName || "—")}</strong><small>${esc(r.campaign || "")}</small></span></td><td><span class="agent-cell">${avatar(r.agent)}<span class="agent-cell-copy"><strong>${esc(r.agent)}</strong><small>${r.employeeCode ? esc(r.employeeCode) : r.agentCodeFromFilename ? `Candidat ${esc(r.agentCodeFromFilename)}` : "À rattacher"}</small></span></span></td><td class="record-id">${esc(recordIndexValue(r))}</td><td>${qualityCell(r)}</td><td>${returnCell}</td><td>${reevaluation}</td><td>${finalCell}</td><td>${recordBadge(r)}</td></tr>`;
+      return `<tr data-open-record="${esc(r.id)}">${checkbox}<td class="record-open-cell"><button class="icon-button record-action-button" type="button" data-action="open-record" data-record-id="${esc(r.id)}" onclick="return window.openQualiContactRecord(event,this.dataset.recordId)" title="Modifier la fiche" aria-label="Modifier la fiche ${esc(recordIndexValue(r))}">${ic("edit")}</button>${!selectionMode && !r.archived && canManageRecords() ? `<button class="icon-button record-action-button record-action-delete" type="button" data-action="archive-record" data-record-id="${esc(r.id)}" title="Supprimer la fiche" aria-label="Supprimer la fiche ${esc(recordIndexValue(r))}">${ic("trash")}</button>` : ""}</td><td>${formatDate(r.callDate)}</td><td><span class="record-source-index"><strong>${esc(r.baseName || "—")}</strong><small>${esc(r.campaign || "")}</small></span></td><td><span class="agent-cell">${avatar(r.agent)}<span class="agent-cell-copy"><strong>${esc(r.agent)}</strong><small>${r.employeeCode ? esc(r.employeeCode) : r.agentCodeFromFilename ? `Candidat ${esc(r.agentCodeFromFilename)}` : "À rattacher"}</small></span></span></td><td class="record-id">${esc(recordIndexValue(r))}</td><td>${qualityCell(r)}</td><td>${kpiCell(r)}</td><td>${returnCell}</td><td>${reevaluation}</td><td>${finalCell}</td><td>${recordBadge(r)}</td></tr>`;
     })
     .join("")}</tbody></table>`;
 }
@@ -2694,7 +2715,7 @@ function renderRecords() {
   ];
   return `${pageHeading("Fiches d’appel", `Retrouvez, filtrez et ouvrez les ${state.records.filter((r) => !r.archived).length} fiches de démonstration. Chaque appel conserve son audio, ses évaluations et son historique.`, `<button class="btn btn-secondary" data-action="export">${ic("download")} Exporter</button><button class="btn btn-primary" data-action="new-record">${ic("plus")} Nouvel enregistrement</button>`)}
     <section class="panel table-panel"><div class="panel-header"><div><h2 class="panel-title">Toutes les fiches</h2><p class="panel-subtitle">Recherche par indice, agent, campagne, base, nom audio ou File ID</p></div><span class="badge badge-gray">${totalRows} résultat${totalRows === 1 ? "" : "s"}</span></div>
-    <div class="filters-row"><button class="icon-button" type="button" data-action="clear-record-filters" title="Effacer tous les filtres" aria-label="Effacer tous les filtres">${ic("filter-x")}</button><label class="filter-search">${ic("search")}<input type="search" id="recordSearch" data-filter="search" value="${esc(f.search)}" placeholder="Indice, agent, base, campagne, nom audio…"></label><select class="filter-select" data-filter="status"><option value="all">Tous les statuts</option>${statuses.map((s) => `<option value="${esc(s)}" ${f.status === s ? "selected" : ""}>${esc(statusText(s))}</option>`).join("")}</select><select class="filter-select" data-filter="campaign"><option value="all">Toutes les campagnes</option>${campaigns.map((c) => `<option value="${esc(c)}" ${f.campaign === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select><select class="filter-select" data-filter="compliance"><option value="all">Toute conformité</option><option value="CONFORME" ${f.compliance === "CONFORME" ? "selected" : ""}>Conforme</option><option value="NON_CONFORME" ${f.compliance === "NON_CONFORME" ? "selected" : ""}>Non conforme</option></select>${canManageRecords() ? `<select class="filter-select" data-filter="archived"><option value="active" ${f.archived !== "archived" ? "selected" : ""}>Fiches actives</option><option value="archived" ${f.archived === "archived" ? "selected" : ""}>Fiches supprimées</option></select>` : ""}<label class="filter-date" style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Date d’appel <input class="filter-select" type="date" data-filter="callFrom" value="${esc(f.callFrom)}" aria-label="Date d’appel – début"/> → <input class="filter-select" type="date" data-filter="callTo" value="${esc(f.callTo)}" aria-label="Date d’appel – fin"/></label><label class="filter-date" style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Date de clôture <input class="filter-select" type="date" data-filter="closedFrom" value="${esc(f.closedFrom)}" aria-label="Date de clôture – début"/> → <input class="filter-select" type="date" data-filter="closedTo" value="${esc(f.closedTo)}" aria-label="Date de clôture – fin"/></label><span class="filter-count">${totalRows} fiche${totalRows === 1 ? "" : "s"}</span></div>
+    <div class="filters-row"><button class="icon-button" type="button" data-action="clear-record-filters" title="Effacer tous les filtres" aria-label="Effacer tous les filtres">${ic("filter-x")}</button><label class="filter-search">${ic("search")}<input type="search" id="recordSearch" data-filter="search" value="${esc(f.search)}" placeholder="Indice, agent, base, campagne, nom audio…"></label><select class="filter-select" data-filter="status"><option value="all">Tous les statuts</option>${statuses.map((s) => `<option value="${esc(s)}" ${f.status === s ? "selected" : ""}>${esc(statusText(s))}</option>`).join("")}</select><select class="filter-select" data-filter="campaign"><option value="all">Toutes les campagnes</option>${campaigns.map((c) => `<option value="${esc(c)}" ${f.campaign === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>${kpiFilterSelect("data-filter", f.kpi)}<select class="filter-select" data-filter="compliance"><option value="all">Toute conformité</option><option value="CONFORME" ${f.compliance === "CONFORME" ? "selected" : ""}>Conforme</option><option value="NON_CONFORME" ${f.compliance === "NON_CONFORME" ? "selected" : ""}>Non conforme</option></select>${canManageRecords() ? `<select class="filter-select" data-filter="archived"><option value="active" ${f.archived !== "archived" ? "selected" : ""}>Fiches actives</option><option value="archived" ${f.archived === "archived" ? "selected" : ""}>Fiches supprimées</option></select>` : ""}<label class="filter-date" style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Date d’appel <input class="filter-select" type="date" data-filter="callFrom" value="${esc(f.callFrom)}" aria-label="Date d’appel – début"/> → <input class="filter-select" type="date" data-filter="callTo" value="${esc(f.callTo)}" aria-label="Date d’appel – fin"/></label><label class="filter-date" style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Date de clôture <input class="filter-select" type="date" data-filter="closedFrom" value="${esc(f.closedFrom)}" aria-label="Date de clôture – début"/> → <input class="filter-select" type="date" data-filter="closedTo" value="${esc(f.closedTo)}" aria-label="Date de clôture – fin"/></label><span class="filter-count">${totalRows} fiche${totalRows === 1 ? "" : "s"}</span></div>
     <div class="table-wrap">${renderRecordsTable(pageRows)}</div><div class="table-footer"><span>${totalRows} fiche${totalRows === 1 ? "" : "s"} · page ${app.recordPage} / ${recordPages}</span><div class="pagination"><button data-record-page="${app.recordPage - 1}" ${app.recordPage <= 1 ? "disabled" : ""}>${ic("chevron-left")}</button>${recordPageButtons}<button data-record-page="${app.recordPage + 1}" ${app.recordPage >= recordPages ? "disabled" : ""}>${ic("chevron-right")}</button></div></div></section>`;
 }
 function renderSend() {
@@ -2722,7 +2743,7 @@ function renderSend() {
   ];
   const sendDateFilter = (label, from, to) =>
     `<label class="filter-date" style="display:inline-flex;gap:6px;align-items:center;font-size:13px">${label} <input class="filter-select" type="date" data-send-filter="${from}" value="${esc(g[from])}" aria-label="${label} – début"/> → <input class="filter-select" type="date" data-send-filter="${to}" value="${esc(g[to])}" aria-label="${label} – fin"/></label>`;
-  const sendFilters = `<div class="filters-row"><button class="icon-button" type="button" data-action="clear-send-filters" title="Effacer tous les filtres" aria-label="Effacer tous les filtres">${ic("filter-x")}</button><select class="filter-select" data-send-filter="status"><option value="all">Tous les statuts</option>${sendStatuses.map((v) => `<option value="${esc(v)}" ${g.status === v ? "selected" : ""}>${esc(statusText(v))}</option>`).join("")}</select><select class="filter-select" data-send-filter="campaign"><option value="all">Toutes les campagnes</option>${sendCampaigns.map((v) => `<option value="${esc(v)}" ${g.campaign === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select>${sendDateFilter("Date d’appel", "callFrom", "callTo")}${sendDateFilter("Date de clôture", "closedFrom", "closedTo")}</div>`;
+  const sendFilters = `<div class="filters-row"><button class="icon-button" type="button" data-action="clear-send-filters" title="Effacer tous les filtres" aria-label="Effacer tous les filtres">${ic("filter-x")}</button><select class="filter-select" data-send-filter="status"><option value="all">Tous les statuts</option>${sendStatuses.map((v) => `<option value="${esc(v)}" ${g.status === v ? "selected" : ""}>${esc(statusText(v))}</option>`).join("")}</select>${kpiFilterSelect("data-send-filter", g.kpi)}<select class="filter-select" data-send-filter="campaign"><option value="all">Toutes les campagnes</option>${sendCampaigns.map((v) => `<option value="${esc(v)}" ${g.campaign === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select>${sendDateFilter("Date d’appel", "callFrom", "callTo")}${sendDateFilter("Date de clôture", "closedFrom", "closedTo")}</div>`;
   const sendPageButtons = Array.from({ length: sendPages }, (_, i) => i + 1)
     .filter((n) => n === 1 || n === sendPages || Math.abs(n - app.sendPage) <= 1)
     .map(
@@ -9785,6 +9806,7 @@ function handleAction(actionEl) {
       Object.assign(app.filterSend, {
         status: "all",
         campaign: "all",
+        kpi: "all",
         callFrom: "",
         callTo: "",
         closedFrom: "",
@@ -9798,6 +9820,7 @@ function handleAction(actionEl) {
         status: "all",
         campaign: "all",
         compliance: "all",
+        kpi: "all",
         callFrom: "",
         callTo: "",
         closedFrom: "",
@@ -10111,6 +10134,11 @@ document.addEventListener("change", (event) => {
   }
   if (event.target.matches('[data-filter="campaign"]')) {
     app.filterRecords.campaign = event.target.value;
+    render();
+    return;
+  }
+  if (event.target.matches('[data-filter="kpi"]')) {
+    app.filterRecords.kpi = event.target.value;
     render();
     return;
   }

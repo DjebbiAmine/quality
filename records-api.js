@@ -175,7 +175,7 @@ function registerRecordRoutes(app, { pool, requireAuth, requireReadyPassword, re
       days[key] = day;
     }
     const text = (key) => { const value = String(req.query[key] || '').trim(); return value && value !== 'all' ? value.slice(0, 200) : ''; };
-    const filters = { status: text('status'), campaign: text('campaign'), ...days };
+    const filters = { status: text('status'), campaign: text('campaign'), kpi: text('kpi'), ...days };
     const compliance = text('compliance');
     const search = text('search');
     if (isClientScopedAuth(req.auth)) {
@@ -185,7 +185,7 @@ function registerRecordRoutes(app, { pool, requireAuth, requireReadyPassword, re
       const inRange = (value, from, to) => { const day = String(value || '').slice(0, 10); return (!from && !to) || (day && (!from || day >= from) && (!to || day <= to)); };
       records = records.filter((r) => (!filters.status || r.status === filters.status) && (!filters.campaign || r.campaign === filters.campaign)
         && inRange(r.callDate, filters.callFrom, filters.callTo) && inRange(r.closedAt, filters.closedFrom, filters.closedTo)
-        && (!compliance || r.internal1?.conformity === compliance) && (!query || [r.id, r.agent, r.client, r.campaign, r.recordIndex, r.baseName, r.sourceFilename].some((value) => normText(value).includes(query))));
+        && (!compliance || r.internal1?.conformity === compliance) && !filters.kpi && (!query || [r.id, r.agent, r.client, r.campaign, r.recordIndex, r.baseName, r.sourceFilename].some((value) => normText(value).includes(query))));
       records.sort((a, b) => String(b.callDate || '').localeCompare(String(a.callDate || '')) || String(b.callTime || '').localeCompare(String(a.callTime || '')) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
       const total = records.length;
       const pages = Math.max(1, Math.ceil(total / pageSize));

@@ -168,6 +168,15 @@ function buildRecordListWhere({archived,filters={},search='',compliance='',scope
   if(filters.closedFrom)add('r.closed_at >= ?::date',filters.closedFrom);
   // Borne haute exclusive au lendemain : reste utilisable par l'index et inclut toute la journée.
   if(filters.closedTo)add("r.closed_at < (?::date + 1)",filters.closedTo);
+  if(filters.kpi){
+    // Même règle que la colonne « KPI » (app.js, kpiLabel) : motif AGENT => NON_CONFORME ; sinon CONFORME si don conforme ou motif PROD(UCTION) ; sinon NON_CONFORME.
+    if(scope.canInternal1===false||!['CONFORME','NON_CONFORME'].includes(filters.kpi))where.push('false');
+    else add(`exists (select 1 from public.crm_record_evaluations e where e.record_id = r.id and e.stage = 'internal1' and e.is_current and (case
+      when coalesce(nullif(e.extra->>'donStatus',''), e.conformity) is null then null
+      when upper(coalesce(e.extra->>'cancelReason','')) = 'AGENT' then 'NON_CONFORME'
+      when coalesce(nullif(e.extra->>'donStatus',''), e.conformity) = 'CONFORME' or upper(coalesce(e.extra->>'cancelReason','')) in ('PROD','PRODUCTION') then 'CONFORME'
+      else 'NON_CONFORME' end) = ?)`,filters.kpi);
+  }
   if(compliance){
     if(scope.canInternal1===false)where.push('false');
     else add("exists (select 1 from public.crm_record_evaluations e where e.record_id = r.id and e.stage = 'internal1' and e.is_current and e.conformity = ?)",compliance);
